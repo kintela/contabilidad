@@ -17,11 +17,6 @@ type Movimiento = {
   importe: number | null;
   detalle?: string | null;
   fijo?: boolean | null;
-  categorias?:
-    | {
-        nombre: string | null;
-      }[]
-    | null;
   categoria?: {
     nombre: string | null;
   } | null;
@@ -221,7 +216,9 @@ export default function DashboardPage() {
 
   const { data, error } = await supabase
         .from("movimientos")
-        .select("id, fecha, tipo, importe, detalle, fijo, categorias(nombre)")
+        .select(
+          "id, fecha, tipo, importe, detalle, fijo, categoria:categoria_id(nombre)"
+        )
         .eq("libro_id", selectedLibroId)
         .gte("fecha", start)
         .lte("fecha", end);
@@ -282,12 +279,7 @@ export default function DashboardPage() {
             ? false
             : amount >= 0;
 
-      const categoryName =
-        (Array.isArray(mov.categorias)
-          ? mov.categorias[0]?.nombre
-          : undefined) ??
-        mov.categoria?.nombre ??
-        "Sin categoría";
+      const categoryName = mov.categoria?.nombre ?? "Sin categoría";
 
       const detailText =
         typeof mov.detalle === "string" && mov.detalle.trim().length > 0
