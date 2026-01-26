@@ -672,7 +672,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-1 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-1 max-h-96 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
@@ -779,7 +779,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-1 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-1 max-h-96 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
