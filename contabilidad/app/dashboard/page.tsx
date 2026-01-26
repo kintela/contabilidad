@@ -52,6 +52,11 @@ export default function DashboardPage() {
   const [movimientosLoading, setMovimientosLoading] = useState(false);
   const [movimientosError, setMovimientosError] = useState<string | null>(null);
 
+  const [showIngresosFijos, setShowIngresosFijos] = useState(true);
+  const [showIngresosVariables, setShowIngresosVariables] = useState(true);
+  const [showGastosFijos, setShowGastosFijos] = useState(true);
+  const [showGastosVariables, setShowGastosVariables] = useState(true);
+
   const todayLabel = useMemo(
     () =>
       new Intl.DateTimeFormat("es-ES", {
@@ -298,6 +303,36 @@ export default function DashboardPage() {
     };
   }, [movimientos]);
 
+  const filteredIngresos = useMemo(() => {
+    return movimientoRows.ingresos.filter((mov) => {
+      const isFijo = mov.fijo === true;
+      if (isFijo && showIngresosFijos) return true;
+      if (!isFijo && showIngresosVariables) return true;
+      return false;
+    });
+  }, [movimientoRows.ingresos, showIngresosFijos, showIngresosVariables]);
+
+  const filteredGastos = useMemo(() => {
+    return movimientoRows.gastos.filter((mov) => {
+      const isFijo = mov.fijo === true;
+      if (isFijo && showGastosFijos) return true;
+      if (!isFijo && showGastosVariables) return true;
+      return false;
+    });
+  }, [movimientoRows.gastos, showGastosFijos, showGastosVariables]);
+
+  const filteredIngresosTotal = useMemo(() => {
+    return filteredIngresos.reduce((sum, mov) => {
+      return sum + Math.abs(Number(mov.importe ?? 0));
+    }, 0);
+  }, [filteredIngresos]);
+
+  const filteredGastosTotal = useMemo(() => {
+    return filteredGastos.reduce((sum, mov) => {
+      return sum + Math.abs(Number(mov.importe ?? 0));
+    }, 0);
+  }, [filteredGastos]);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
       style: "currency",
@@ -531,17 +566,40 @@ export default function DashboardPage() {
 
             <section className="grid gap-6 lg:grid-cols-2">
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                  Ingresos
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    Ingresos
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-[var(--accent)]"
+                        checked={showIngresosFijos}
+                        onChange={(event) =>
+                          setShowIngresosFijos(event.target.checked)
+                        }
+                      />
+                      Fijos
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-[var(--accent)]"
+                        checked={showIngresosVariables}
+                        onChange={(event) =>
+                          setShowIngresosVariables(event.target.checked)
+                        }
+                      />
+                      Variables
+                    </label>
+                  </div>
+                </div>
                 <p
                   className="mt-3 text-3xl font-semibold text-[var(--foreground)]"
                   style={{ fontFamily: "var(--font-fraunces)" }}
                 >
-                  {formatCurrency(totals.ingresos)}
-                </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  Total acumulado del año
+                  {formatCurrency(filteredIngresosTotal)}
                 </p>
                 <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
@@ -557,7 +615,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {movimientoRows.ingresos.length === 0 && (
+                      {filteredIngresos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -567,7 +625,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {movimientoRows.ingresos.map((mov) => (
+                      {filteredIngresos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -593,17 +651,40 @@ export default function DashboardPage() {
               </article>
 
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                  Gastos
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    Gastos
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-[var(--accent)]"
+                        checked={showGastosFijos}
+                        onChange={(event) =>
+                          setShowGastosFijos(event.target.checked)
+                        }
+                      />
+                      Fijos
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-[var(--accent)]"
+                        checked={showGastosVariables}
+                        onChange={(event) =>
+                          setShowGastosVariables(event.target.checked)
+                        }
+                      />
+                      Variables
+                    </label>
+                  </div>
+                </div>
                 <p
                   className="mt-3 text-3xl font-semibold text-[var(--foreground)]"
                   style={{ fontFamily: "var(--font-fraunces)" }}
                 >
-                  {formatCurrency(totals.gastos)}
-                </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  Total acumulado del año
+                  {formatCurrency(filteredGastosTotal)}
                 </p>
                 <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
@@ -619,7 +700,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {movimientoRows.gastos.length === 0 && (
+                      {filteredGastos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -629,7 +710,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {movimientoRows.gastos.map((mov) => (
+                      {filteredGastos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
