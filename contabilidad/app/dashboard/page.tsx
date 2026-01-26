@@ -15,6 +15,8 @@ type Movimiento = {
   fecha: string;
   tipo: string | null;
   importe: number | null;
+  detalle?: string | null;
+  fijo?: boolean | null;
   categorias?: {
     nombre: string | null;
   } | null;
@@ -206,9 +208,9 @@ export default function DashboardPage() {
       const start = `${selectedYear}-01-01`;
       const end = `${selectedYear}-12-31`;
 
-      const { data, error } = await supabase
+  const { data, error } = await supabase
         .from("movimientos")
-        .select("id, fecha, tipo, importe, categorias(nombre)")
+        .select("id, fecha, tipo, importe, detalle, fijo, categorias(nombre)")
         .eq("libro_id", selectedLibroId)
         .gte("fecha", start)
         .lte("fecha", end);
@@ -274,11 +276,17 @@ export default function DashboardPage() {
         mov.categoria?.nombre ??
         "Sin categoría";
 
+      const detailText =
+        typeof mov.detalle === "string" && mov.detalle.trim().length > 0
+          ? mov.detalle.trim()
+          : null;
+
       return {
         ...mov,
         kind: isIngreso ? "ingreso" : "gasto",
         sortValue: Math.abs(amount),
         categoryName,
+        detailText,
       };
     });
 
@@ -535,13 +543,14 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   Total acumulado del año
                 </p>
-                <div className="mt-5 max-h-56 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
                         <th className="px-3 py-2 font-semibold">Fecha</th>
                         <th className="px-3 py-2 font-semibold">Categoría</th>
-                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 font-semibold">Detalle</th>
+                        <th className="px-3 py-2 font-semibold">Fijo</th>
                         <th className="px-3 py-2 text-right font-semibold">
                           Importe
                         </th>
@@ -552,7 +561,7 @@ export default function DashboardPage() {
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
-                            colSpan={4}
+                            colSpan={5}
                           >
                             Sin movimientos
                           </td>
@@ -567,8 +576,11 @@ export default function DashboardPage() {
                             {formatDate(mov.fecha)}
                           </td>
                           <td className="px-3 py-2">{mov.categoryName}</td>
-                          <td className="px-3 py-2 capitalize">
-                            {mov.tipo ?? mov.kind}
+                          <td className="px-3 py-2">
+                            {mov.detailText ?? "—"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {mov.fijo === true ? "Sí" : "No"}
                           </td>
                           <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
                             {formatMovementAmount(mov)}
@@ -593,13 +605,14 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   Total acumulado del año
                 </p>
-                <div className="mt-5 max-h-56 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
                         <th className="px-3 py-2 font-semibold">Fecha</th>
                         <th className="px-3 py-2 font-semibold">Categoría</th>
-                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 font-semibold">Detalle</th>
+                        <th className="px-3 py-2 font-semibold">Fijo</th>
                         <th className="px-3 py-2 text-right font-semibold">
                           Importe
                         </th>
@@ -610,7 +623,7 @@ export default function DashboardPage() {
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
-                            colSpan={4}
+                            colSpan={5}
                           >
                             Sin movimientos
                           </td>
@@ -625,8 +638,11 @@ export default function DashboardPage() {
                             {formatDate(mov.fecha)}
                           </td>
                           <td className="px-3 py-2">{mov.categoryName}</td>
-                          <td className="px-3 py-2 capitalize">
-                            {mov.tipo ?? mov.kind}
+                          <td className="px-3 py-2">
+                            {mov.detailText ?? "—"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {mov.fijo === true ? "Sí" : "No"}
                           </td>
                           <td className="px-3 py-2 text-right font-semibold text-rose-600 dark:text-rose-400">
                             {formatMovementAmount(mov)}
