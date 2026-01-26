@@ -296,7 +296,7 @@ export default function DashboardPage() {
 
       return {
         ...mov,
-        kind: isIngreso ? "ingreso" : "gasto",
+        kind: (isIngreso ? "ingreso" : "gasto") as "ingreso" | "gasto",
         sortValue: Math.abs(amount),
         categoryName,
         detailText,
