@@ -285,7 +285,7 @@ export default function DashboardPage() {
       const categoryName =
         (Array.isArray(mov.categorias)
           ? mov.categorias[0]?.nombre
-          : mov.categorias?.nombre) ??
+          : undefined) ??
         mov.categoria?.nombre ??
         "Sin categoría";
 
