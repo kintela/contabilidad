@@ -56,6 +56,10 @@ export default function DashboardPage() {
   const [showIngresosVariables, setShowIngresosVariables] = useState(true);
   const [showGastosFijos, setShowGastosFijos] = useState(true);
   const [showGastosVariables, setShowGastosVariables] = useState(true);
+  const [selectedIngresosCategory, setSelectedIngresosCategory] =
+    useState("todas");
+  const [selectedGastosCategory, setSelectedGastosCategory] =
+    useState("todas");
 
   const todayLabel = useMemo(
     () =>
@@ -321,17 +325,61 @@ export default function DashboardPage() {
     });
   }, [movimientoRows.gastos, showGastosFijos, showGastosVariables]);
 
-  const filteredIngresosTotal = useMemo(() => {
-    return filteredIngresos.reduce((sum, mov) => {
-      return sum + Math.abs(Number(mov.importe ?? 0));
-    }, 0);
+  const ingresoCategories = useMemo(() => {
+    return Array.from(
+      new Set(filteredIngresos.map((mov) => mov.categoryName))
+    ).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [filteredIngresos]);
 
-  const filteredGastosTotal = useMemo(() => {
-    return filteredGastos.reduce((sum, mov) => {
+  const gastoCategories = useMemo(() => {
+    return Array.from(
+      new Set(filteredGastos.map((mov) => mov.categoryName))
+    ).sort((a, b) => a.localeCompare(b, "es-ES"));
+  }, [filteredGastos]);
+
+  useEffect(() => {
+    if (
+      selectedIngresosCategory !== "todas" &&
+      !ingresoCategories.includes(selectedIngresosCategory)
+    ) {
+      setSelectedIngresosCategory("todas");
+    }
+  }, [ingresoCategories, selectedIngresosCategory]);
+
+  useEffect(() => {
+    if (
+      selectedGastosCategory !== "todas" &&
+      !gastoCategories.includes(selectedGastosCategory)
+    ) {
+      setSelectedGastosCategory("todas");
+    }
+  }, [gastoCategories, selectedGastosCategory]);
+
+  const displayedIngresos = useMemo(() => {
+    if (selectedIngresosCategory === "todas") return filteredIngresos;
+    return filteredIngresos.filter(
+      (mov) => mov.categoryName === selectedIngresosCategory
+    );
+  }, [filteredIngresos, selectedIngresosCategory]);
+
+  const displayedGastos = useMemo(() => {
+    if (selectedGastosCategory === "todas") return filteredGastos;
+    return filteredGastos.filter(
+      (mov) => mov.categoryName === selectedGastosCategory
+    );
+  }, [filteredGastos, selectedGastosCategory]);
+
+  const filteredIngresosTotal = useMemo(() => {
+    return displayedIngresos.reduce((sum, mov) => {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
-  }, [filteredGastos]);
+  }, [displayedIngresos]);
+
+  const filteredGastosTotal = useMemo(() => {
+    return displayedGastos.reduce((sum, mov) => {
+      return sum + Math.abs(Number(mov.importe ?? 0));
+    }, 0);
+  }, [displayedGastos]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
@@ -466,9 +514,9 @@ export default function DashboardPage() {
         {session && !sessionLoading && (
           <div className="flex flex-1 flex-col gap-8">
             <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-              <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+              <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
                 <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                  Libro activo
+                  Cuenta activa
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <h3
@@ -531,7 +579,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+              <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
                 <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
                   <span>Balance</span>
                   <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
@@ -548,9 +596,6 @@ export default function DashboardPage() {
                 >
                   {formatCurrency(totals.balance)}
                 </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  Ingresos menos gastos
-                </p>
                 {movimientosLoading && (
                   <p className="mt-3 text-sm text-[var(--muted)]">
                     Actualizando datos...
@@ -565,43 +610,65 @@ export default function DashboardPage() {
             </section>
 
             <section className="grid gap-6 lg:grid-cols-2">
-              <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                    Ingresos
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="accent-[var(--accent)]"
-                        checked={showIngresosFijos}
+              <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                      Ingresos
+                    </p>
+                    <p
+                      className="mt-1 text-3xl font-semibold text-[var(--foreground)]"
+                      style={{ fontFamily: "var(--font-fraunces)" }}
+                    >
+                      {formatCurrency(filteredIngresosTotal)}
+                    </p>
+                  </div>
+                  <div className="ml-auto flex flex-col items-start gap-2 text-xs text-[var(--muted)]">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={showIngresosFijos}
+                          onChange={(event) =>
+                            setShowIngresosFijos(event.target.checked)
+                          }
+                        />
+                        Fijos
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={showIngresosVariables}
+                          onChange={(event) =>
+                            setShowIngresosVariables(event.target.checked)
+                          }
+                        />
+                        Variables
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Categoría</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedIngresosCategory}
                         onChange={(event) =>
-                          setShowIngresosFijos(event.target.checked)
+                          setSelectedIngresosCategory(event.target.value)
                         }
-                      />
-                      Fijos
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="accent-[var(--accent)]"
-                        checked={showIngresosVariables}
-                        onChange={(event) =>
-                          setShowIngresosVariables(event.target.checked)
-                        }
-                      />
-                      Variables
-                    </label>
+                        disabled={ingresoCategories.length === 0}
+                      >
+                        <option value="todas">Todas</option>
+                        {ingresoCategories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
-                <p
-                  className="mt-3 text-3xl font-semibold text-[var(--foreground)]"
-                  style={{ fontFamily: "var(--font-fraunces)" }}
-                >
-                  {formatCurrency(filteredIngresosTotal)}
-                </p>
-                <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-1 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
@@ -615,7 +682,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {filteredIngresos.length === 0 && (
+                      {displayedIngresos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -625,7 +692,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {filteredIngresos.map((mov) => (
+                      {displayedIngresos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -650,43 +717,65 @@ export default function DashboardPage() {
                 </div>
               </article>
 
-              <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                    Gastos
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="accent-[var(--accent)]"
-                        checked={showGastosFijos}
+              <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                      Gastos
+                    </p>
+                    <p
+                      className="mt-1 text-3xl font-semibold text-[var(--foreground)]"
+                      style={{ fontFamily: "var(--font-fraunces)" }}
+                    >
+                      {formatCurrency(filteredGastosTotal)}
+                    </p>
+                  </div>
+                  <div className="ml-auto flex flex-col items-start gap-2 text-xs text-[var(--muted)]">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={showGastosFijos}
+                          onChange={(event) =>
+                            setShowGastosFijos(event.target.checked)
+                          }
+                        />
+                        Fijos
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={showGastosVariables}
+                          onChange={(event) =>
+                            setShowGastosVariables(event.target.checked)
+                          }
+                        />
+                        Variables
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Categoría</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedGastosCategory}
                         onChange={(event) =>
-                          setShowGastosFijos(event.target.checked)
+                          setSelectedGastosCategory(event.target.value)
                         }
-                      />
-                      Fijos
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="accent-[var(--accent)]"
-                        checked={showGastosVariables}
-                        onChange={(event) =>
-                          setShowGastosVariables(event.target.checked)
-                        }
-                      />
-                      Variables
-                    </label>
+                        disabled={gastoCategories.length === 0}
+                      >
+                        <option value="todas">Todas</option>
+                        {gastoCategories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
-                <p
-                  className="mt-3 text-3xl font-semibold text-[var(--foreground)]"
-                  style={{ fontFamily: "var(--font-fraunces)" }}
-                >
-                  {formatCurrency(filteredGastosTotal)}
-                </p>
-                <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                <div className="mt-1 max-h-64 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
@@ -700,7 +789,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {filteredGastos.length === 0 && (
+                      {displayedGastos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -710,7 +799,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {filteredGastos.map((mov) => (
+                      {displayedGastos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
