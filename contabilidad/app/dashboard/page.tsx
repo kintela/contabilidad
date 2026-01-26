@@ -15,6 +15,12 @@ type Movimiento = {
   fecha: string;
   tipo: string | null;
   importe: number | null;
+  categorias?: {
+    nombre: string | null;
+  } | null;
+  categoria?: {
+    nombre: string | null;
+  } | null;
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -51,6 +57,13 @@ export default function DashboardPage() {
       }).format(new Date()),
     []
   );
+
+  const formatDate = (value: string) =>
+    new Intl.DateTimeFormat("es-ES", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    }).format(new Date(value));
 
   useEffect(() => {
     let isMounted = true;
@@ -195,7 +208,7 @@ export default function DashboardPage() {
 
       const { data, error } = await supabase
         .from("movimientos")
-        .select("id, fecha, tipo, importe")
+        .select("id, fecha, tipo, importe, categorias(nombre)")
         .eq("libro_id", selectedLibroId)
         .gte("fecha", start)
         .lte("fecha", end);
@@ -245,12 +258,54 @@ export default function DashboardPage() {
     };
   }, [movimientos]);
 
+  const movimientoRows = useMemo(() => {
+    const withKind = movimientos.map((mov) => {
+      const amount = Number(mov.importe ?? 0);
+      const tipo = (mov.tipo ?? "").toLowerCase();
+      const isIngreso =
+        tipo === "ingreso" || tipo === "income"
+          ? true
+          : tipo === "gasto" || tipo === "expense"
+            ? false
+            : amount >= 0;
+
+      const categoryName =
+        mov.categorias?.nombre ??
+        mov.categoria?.nombre ??
+        "Sin categoría";
+
+      return {
+        ...mov,
+        kind: isIngreso ? "ingreso" : "gasto",
+        sortValue: Math.abs(amount),
+        categoryName,
+      };
+    });
+
+    const sorted = [...withKind].sort((a, b) => b.sortValue - a.sortValue);
+
+    return {
+      ingresos: sorted.filter((mov) => mov.kind === "ingreso"),
+      gastos: sorted.filter((mov) => mov.kind === "gasto"),
+    };
+  }, [movimientos]);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
       style: "currency",
       currency,
       maximumFractionDigits: 2,
     }).format(value);
+
+  const formatMovementAmount = (mov: {
+    importe: number | null;
+    kind: "ingreso" | "gasto";
+  }) => {
+    const amount = Number(mov.importe ?? 0);
+    const normalized =
+      mov.kind === "gasto" ? -Math.abs(amount) : Math.abs(amount);
+    return formatCurrency(normalized);
+  };
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -288,12 +343,12 @@ export default function DashboardPage() {
             </h1>
           </div>
 
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="rounded-full border border-black/10 bg-[var(--surface)] px-4 py-2 text-sm text-[var(--muted)] shadow-sm dark:border-white/10">
               {todayLabel}
             </div>
             {session && !sessionLoading && (
-              <div className="flex flex-wrap items-center justify-end gap-3 text-sm text-[var(--muted)]">
+              <>
                 <span className="rounded-full border border-black/10 bg-[var(--surface)] px-4 py-2 text-sm text-[var(--foreground)] shadow-sm dark:border-white/10">
                   {session.user.email}
                 </span>
@@ -303,7 +358,7 @@ export default function DashboardPage() {
                 >
                   Cerrar sesión
                 </button>
-              </div>
+              </>
             )}
           </div>
         </header>
@@ -369,41 +424,16 @@ export default function DashboardPage() {
           <div className="flex flex-1 flex-col gap-8">
             <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
               <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                      Libro activo
-                    </p>
-                    <h3
-                      className="text-2xl font-semibold text-[var(--foreground)]"
-                      style={{ fontFamily: "var(--font-fraunces)" }}
-                    >
-                      {selectedLibro?.nombre ?? "Selecciona un libro"}
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-                    <span>Año</span>
-                    <select
-                      className="rounded-full border border-black/10 bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
-                      value={selectedYear}
-                      onChange={(event) =>
-                        setSelectedYear(Number(event.target.value))
-                      }
-                      disabled={availableYears.length === 0}
-                    >
-                      {availableYears.length === 0 && (
-                        <option value={CURRENT_YEAR}>{CURRENT_YEAR}</option>
-                      )}
-                      {availableYears.map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex flex-wrap gap-3">
+                <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                  Libro activo
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <h3
+                    className="text-2xl font-semibold text-[var(--foreground)]"
+                    style={{ fontFamily: "var(--font-fraunces)" }}
+                  >
+                    {selectedLibro?.nombre ?? "Selecciona un libro"}
+                  </h3>
                   {librosLoading && (
                     <span className="text-sm text-[var(--muted)]">
                       Cargando libros...
@@ -435,24 +465,48 @@ export default function DashboardPage() {
                         {libro.nombre}
                       </label>
                     ))}
+                  <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                    <span>Año</span>
+                    <select
+                      className="rounded-full border border-black/10 bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                      value={selectedYear}
+                      onChange={(event) =>
+                        setSelectedYear(Number(event.target.value))
+                      }
+                      disabled={availableYears.length === 0}
+                    >
+                      {availableYears.length === 0 && (
+                        <option value={CURRENT_YEAR}>{CURRENT_YEAR}</option>
+                      )}
+                      {availableYears.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
               <div className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                  Estado
-                </p>
-                <h3
-                  className="mt-2 text-2xl font-semibold text-[var(--foreground)]"
+                <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                  <span>Balance</span>
+                  <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
+                    {selectedYear}
+                  </span>
+                </div>
+                <p
+                  className={`mt-3 text-3xl font-semibold ${
+                    totals.balance >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}
                   style={{ fontFamily: "var(--font-fraunces)" }}
                 >
-                  {selectedYear}
-                </h3>
-                <p className="mt-3 text-sm text-[var(--muted)]">
-                  Movimientos cargados:{" "}
-                  <span className="font-semibold text-[var(--foreground)]">
-                    {movimientos.length}
-                  </span>
+                  {formatCurrency(totals.balance)}
+                </p>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  Ingresos menos gastos
                 </p>
                 {movimientosLoading && (
                   <p className="mt-3 text-sm text-[var(--muted)]">
@@ -467,7 +521,7 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            <section className="grid gap-6 lg:grid-cols-3">
+            <section className="grid gap-6 lg:grid-cols-2">
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
                 <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
                   Ingresos
@@ -481,6 +535,49 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   Total acumulado del año
                 </p>
+                <div className="mt-5 max-h-56 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
+                      <tr className="border-b border-black/5 dark:border-white/10">
+                        <th className="px-3 py-2 font-semibold">Fecha</th>
+                        <th className="px-3 py-2 font-semibold">Categoría</th>
+                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 text-right font-semibold">
+                          Importe
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-[var(--foreground)]">
+                      {movimientoRows.ingresos.length === 0 && (
+                        <tr>
+                          <td
+                            className="px-3 py-3 text-center text-[var(--muted)]"
+                            colSpan={4}
+                          >
+                            Sin movimientos
+                          </td>
+                        </tr>
+                      )}
+                      {movimientoRows.ingresos.map((mov) => (
+                        <tr
+                          key={mov.id}
+                          className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                        >
+                          <td className="px-3 py-2">
+                            {formatDate(mov.fecha)}
+                          </td>
+                          <td className="px-3 py-2">{mov.categoryName}</td>
+                          <td className="px-3 py-2 capitalize">
+                            {mov.tipo ?? mov.kind}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                            {formatMovementAmount(mov)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </article>
 
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
@@ -496,26 +593,51 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   Total acumulado del año
                 </p>
+                <div className="mt-5 max-h-56 overflow-y-auto rounded-2xl border border-black/5 dark:border-white/10">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
+                      <tr className="border-b border-black/5 dark:border-white/10">
+                        <th className="px-3 py-2 font-semibold">Fecha</th>
+                        <th className="px-3 py-2 font-semibold">Categoría</th>
+                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 text-right font-semibold">
+                          Importe
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-[var(--foreground)]">
+                      {movimientoRows.gastos.length === 0 && (
+                        <tr>
+                          <td
+                            className="px-3 py-3 text-center text-[var(--muted)]"
+                            colSpan={4}
+                          >
+                            Sin movimientos
+                          </td>
+                        </tr>
+                      )}
+                      {movimientoRows.gastos.map((mov) => (
+                        <tr
+                          key={mov.id}
+                          className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                        >
+                          <td className="px-3 py-2">
+                            {formatDate(mov.fecha)}
+                          </td>
+                          <td className="px-3 py-2">{mov.categoryName}</td>
+                          <td className="px-3 py-2 capitalize">
+                            {mov.tipo ?? mov.kind}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-rose-600 dark:text-rose-400">
+                            {formatMovementAmount(mov)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </article>
 
-              <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                  Diferencia
-                </p>
-                <p
-                  className={`mt-3 text-3xl font-semibold ${
-                    totals.balance >= 0
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-600 dark:text-rose-400"
-                  }`}
-                  style={{ fontFamily: "var(--font-fraunces)" }}
-                >
-                  {formatCurrency(totals.balance)}
-                </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  Ingresos menos gastos
-                </p>
-              </article>
             </section>
           </div>
         )}
