@@ -17,9 +17,11 @@ type Movimiento = {
   importe: number | null;
   detalle?: string | null;
   fijo?: boolean | null;
-  categorias?: {
-    nombre: string | null;
-  } | null;
+  categorias?:
+    | {
+        nombre: string | null;
+      }[]
+    | null;
   categoria?: {
     nombre: string | null;
   } | null;
@@ -281,7 +283,9 @@ export default function DashboardPage() {
             : amount >= 0;
 
       const categoryName =
-        mov.categorias?.nombre ??
+        (Array.isArray(mov.categorias)
+          ? mov.categorias[0]?.nombre
+          : mov.categorias?.nombre) ??
         mov.categoria?.nombre ??
         "Sin categoría";
 
