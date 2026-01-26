@@ -17,9 +17,8 @@ type Movimiento = {
   importe: number | null;
   detalle?: string | null;
   fijo?: boolean | null;
-  categoria?: {
-    nombre: string | null;
-  } | null;
+  categoria_id?: string | null;
+  categoria_nombre?: string | null;
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -214,11 +213,9 @@ export default function DashboardPage() {
       const start = `${selectedYear}-01-01`;
       const end = `${selectedYear}-12-31`;
 
-  const { data, error } = await supabase
+      const { data: movimientosData, error } = await supabase
         .from("movimientos")
-        .select(
-          "id, fecha, tipo, importe, detalle, fijo, categoria:categoria_id(nombre)"
-        )
+        .select("id, fecha, tipo, importe, detalle, fijo, categoria_id")
         .eq("libro_id", selectedLibroId)
         .gte("fecha", start)
         .lte("fecha", end);
@@ -226,9 +223,43 @@ export default function DashboardPage() {
       if (error) {
         setMovimientosError(error.message);
         setMovimientos([]);
-      } else {
-        setMovimientos(data ?? []);
+        setMovimientosLoading(false);
+        return;
       }
+
+      const categoriaIds = Array.from(
+        new Set(
+          (movimientosData ?? [])
+            .map((mov) => mov.categoria_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      let categoriaMap = new Map<string, string | null>();
+
+      if (categoriaIds.length > 0) {
+        const { data: categoriasData, error: categoriasError } = await supabase
+          .from("categorias")
+          .select("id, nombre")
+          .in("id", categoriaIds);
+
+        if (categoriasError) {
+          setMovimientosError(categoriasError.message);
+        } else {
+          categoriasData?.forEach((categoria) => {
+            categoriaMap.set(categoria.id, categoria.nombre);
+          });
+        }
+      }
+
+      const enriched = (movimientosData ?? []).map((mov) => ({
+        ...mov,
+        categoria_nombre: mov.categoria_id
+          ? categoriaMap.get(mov.categoria_id) ?? null
+          : null,
+      }));
+
+      setMovimientos(enriched);
       setMovimientosLoading(false);
     };
 
@@ -279,7 +310,7 @@ export default function DashboardPage() {
             ? false
             : amount >= 0;
 
-      const categoryName = mov.categoria?.nombre ?? "Sin categoría";
+      const categoryName = mov.categoria_nombre ?? "Sin categoría";
 
       const detailText =
         typeof mov.detalle === "string" && mov.detalle.trim().length > 0
