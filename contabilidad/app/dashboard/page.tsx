@@ -52,6 +52,8 @@ export default function DashboardPage() {
   const [showIngresosVariables, setShowIngresosVariables] = useState(true);
   const [showGastosFijos, setShowGastosFijos] = useState(true);
   const [showGastosVariables, setShowGastosVariables] = useState(true);
+  const [showChartFijos, setShowChartFijos] = useState(true);
+  const [showChartVariables, setShowChartVariables] = useState(true);
   const [selectedIngresosCategory, setSelectedIngresosCategory] =
     useState("todas");
   const [selectedGastosCategory, setSelectedGastosCategory] =
@@ -407,6 +409,81 @@ export default function DashboardPage() {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
   }, [displayedGastos]);
+
+  const chartData = useMemo(() => {
+    type ChartRow = {
+      category: string;
+      kind: "ingreso" | "gasto";
+      fijo: number;
+      variable: number;
+      total: number;
+    };
+
+    const grouped = new Map<string, ChartRow>();
+
+    const allRows = [...movimientoRows.ingresos, ...movimientoRows.gastos];
+
+    allRows.forEach((mov) => {
+      const isFijo = mov.fijo === true;
+      if (isFijo && !showChartFijos) return;
+      if (!isFijo && !showChartVariables) return;
+
+      const amount = Math.abs(Number(mov.importe ?? 0));
+      const category = mov.categoryName;
+      const key = `${mov.kind}:${category}`;
+      const existing = grouped.get(key) ?? {
+        category,
+        kind: mov.kind,
+        fijo: 0,
+        variable: 0,
+        total: 0,
+      };
+
+      if (isFijo) {
+        existing.fijo += amount;
+      } else {
+        existing.variable += amount;
+      }
+
+      existing.total = existing.fijo + existing.variable;
+      grouped.set(key, existing);
+    });
+
+    const ingresos: ChartRow[] = [];
+    const gastos: ChartRow[] = [];
+
+    grouped.forEach((row) => {
+      if (row.total === 0) return;
+      if (row.kind === "ingreso") {
+        ingresos.push(row);
+      } else {
+        gastos.push(row);
+      }
+    });
+
+    ingresos.sort((a, b) => b.total - a.total);
+    gastos.sort((a, b) => b.total - a.total);
+
+    return { ingresos, gastos };
+  }, [
+    movimientoRows.ingresos,
+    movimientoRows.gastos,
+    showChartFijos,
+    showChartVariables,
+  ]);
+
+  const chartMax = useMemo(() => {
+    const allRows = [...chartData.ingresos, ...chartData.gastos];
+    if (allRows.length === 0) return 1;
+    return Math.max(1, ...allRows.map((row) => row.total));
+  }, [chartData]);
+
+  const chartColumnWidth = 128;
+  const chartColumnCount =
+    chartData.ingresos.length +
+    chartData.gastos.length +
+    (chartData.ingresos.length > 0 && chartData.gastos.length > 0 ? 1 : 0);
+  const chartMinWidth = Math.max(8, chartColumnCount) * chartColumnWidth;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
@@ -851,6 +928,166 @@ export default function DashboardPage() {
                 </div>
               </article>
 
+            </section>
+
+            <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    Visualización
+                  </p>
+                  <h2
+                    className="mt-2 text-2xl font-semibold text-[var(--foreground)]"
+                    style={{ fontFamily: "var(--font-fraunces)" }}
+                  >
+                    Ingresos y gastos por categoría
+                  </h2>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    Eje X con categorías y eje Y con importes. Ingresos primero,
+                    gastos después, con apilado fijo/variable.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--accent)]"
+                      checked={showChartFijos}
+                      onChange={(event) =>
+                        setShowChartFijos(event.target.checked)
+                      }
+                    />
+                    Fijos
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--accent)]"
+                      checked={showChartVariables}
+                      onChange={(event) =>
+                        setShowChartVariables(event.target.checked)
+                      }
+                    />
+                    Variables
+                  </label>
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                      Ingreso fijo
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                      Ingreso variable
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-rose-600" />
+                      Gasto fijo
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-rose-300" />
+                      Gasto variable
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="mt-6 max-w-full overflow-x-auto pb-2"
+                style={{ scrollbarGutter: "stable" }}
+              >
+                {chartData.ingresos.length === 0 &&
+                chartData.gastos.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                    No hay datos para mostrar con los filtros actuales.
+                  </div>
+                ) : (
+                  <div
+                    className="relative"
+                    style={{ minWidth: `${chartMinWidth}px` }}
+                  >
+                    <div className="pointer-events-none absolute inset-x-0 bottom-6 top-6 flex flex-col justify-between">
+                      {[0, 1, 2, 3, 4].map((line) => (
+                        <div
+                          key={line}
+                          className="h-px bg-black/5 dark:bg-white/10"
+                        />
+                      ))}
+                    </div>
+                    <div className="relative flex min-w-max items-end gap-6 pb-6 pt-6">
+                      <div className="flex items-end gap-4">
+                        {chartData.ingresos.map((row) => (
+                          <div
+                            key={`ingreso-${row.category}`}
+                            className="flex w-32 flex-col items-center gap-2"
+                          >
+                            <span className="text-[11px] font-semibold text-emerald-500 dark:text-emerald-400">
+                              {formatCurrency(row.total)}
+                            </span>
+                            <div className="flex h-40 w-10 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
+                              <div
+                                className="bg-emerald-600"
+                                style={{
+                                  height: `${(row.fijo / chartMax) * 100}%`,
+                                }}
+                              />
+                              <div
+                                className="bg-emerald-300"
+                                style={{
+                                  height: `${(row.variable / chartMax) * 100}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-center text-[11px] leading-snug text-[var(--muted)]">
+                              {row.category}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {chartData.ingresos.length > 0 &&
+                      chartData.gastos.length > 0 ? (
+                        <div className="flex h-full items-end">
+                          <div className="h-full w-px bg-black/10 dark:bg-white/10" />
+                        </div>
+                      ) : null}
+
+                      <div className="flex items-end gap-4">
+                        {chartData.gastos.map((row) => (
+                          <div
+                            key={`gasto-${row.category}`}
+                            className="flex w-32 flex-col items-center gap-2"
+                          >
+                            <span className="text-[11px] font-semibold text-rose-500 dark:text-rose-400">
+                              {formatCurrency(row.total)}
+                            </span>
+                            <div className="flex h-40 w-10 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
+                              <div
+                                className="bg-rose-600"
+                                style={{
+                                  height: `${(row.fijo / chartMax) * 100}%`,
+                                }}
+                              />
+                              <div
+                                className="bg-rose-300"
+                                style={{
+                                  height: `${(row.variable / chartMax) * 100}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-center text-[11px] leading-snug text-[var(--muted)]">
+                              {row.category}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex min-w-max items-center justify-between text-[11px] uppercase tracking-[0.3em] text-[var(--muted)]">
+                      <span>Ingresos</span>
+                      <span>Gastos</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </section>
           </div>
         )}
