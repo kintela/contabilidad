@@ -54,6 +54,11 @@ export default function DashboardPage() {
   const [showGastosVariables, setShowGastosVariables] = useState(true);
   const [showChartFijos, setShowChartFijos] = useState(true);
   const [showChartVariables, setShowChartVariables] = useState(true);
+  const [selectedSegment, setSelectedSegment] = useState<{
+    kind: "ingreso" | "gasto";
+    fijo: boolean;
+    category: string;
+  } | null>(null);
   const [selectedIngresosCategory, setSelectedIngresosCategory] =
     useState("todas");
   const [selectedGastosCategory, setSelectedGastosCategory] =
@@ -485,6 +490,87 @@ export default function DashboardPage() {
     (chartData.ingresos.length > 0 && chartData.gastos.length > 0 ? 1 : 0);
   const chartMinWidth = Math.max(8, chartColumnCount) * chartColumnWidth;
 
+  useEffect(() => {
+    if (!selectedSegment) return;
+    const source =
+      selectedSegment.kind === "ingreso"
+        ? chartData.ingresos
+        : chartData.gastos;
+    const matching = source.find(
+      (row) => row.category === selectedSegment.category
+    );
+    const segmentValue = matching
+      ? selectedSegment.fijo
+        ? matching.fijo
+        : matching.variable
+      : 0;
+
+    if (!matching || segmentValue === 0) {
+      setSelectedSegment(null);
+    }
+  }, [chartData, selectedSegment]);
+
+  const selectedMovimientos = useMemo(() => {
+    if (!selectedSegment) return [];
+    const source =
+      selectedSegment.kind === "ingreso"
+        ? movimientoRows.ingresos
+        : movimientoRows.gastos;
+
+    return source.filter((mov) => {
+      const isFijo = mov.fijo === true;
+      const matchesFijo = selectedSegment.fijo ? isFijo : !isFijo;
+      return (
+        mov.categoryName === selectedSegment.category &&
+        matchesFijo
+      );
+    });
+  }, [movimientoRows, selectedSegment]);
+
+  const monthLabels = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("es-ES", { month: "short" });
+    return Array.from({ length: 12 }, (_, index) =>
+      formatter.format(new Date(selectedYear, index, 1))
+    );
+  }, [selectedYear]);
+
+  const detailGroups = useMemo(() => {
+    if (!selectedSegment) return [];
+
+    const byMonth = Array.from({ length: 12 }, () => new Map<string, number>());
+
+    selectedMovimientos.forEach((mov) => {
+      const monthIndex = new Date(mov.fecha).getMonth();
+      const detail = mov.detailText ?? "Sin detalle";
+      const amount = Math.abs(Number(mov.importe ?? 0));
+      const bucket = byMonth[monthIndex];
+      bucket.set(detail, (bucket.get(detail) ?? 0) + amount);
+    });
+
+    return byMonth
+      .map((bucket, index) => {
+        const items = Array.from(bucket.entries())
+          .map(([detail, total]) => ({ detail, total }))
+          .sort((a, b) => b.total - a.total);
+        const total = items.reduce((sum, item) => sum + item.total, 0);
+        return {
+          monthIndex: index,
+          monthLabel: monthLabels[index],
+          items,
+          total,
+        };
+      })
+      .filter((group) => group.total > 0);
+  }, [monthLabels, selectedMovimientos, selectedSegment]);
+
+  const detailMax = useMemo(() => {
+    const totals = detailGroups.flatMap((group) =>
+      group.items.map((item) => item.total)
+    );
+    if (totals.length === 0) return 1;
+    return Math.max(1, ...totals);
+  }, [detailGroups]);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
       style: "currency",
@@ -521,6 +607,14 @@ export default function DashboardPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
   };
+
+  const selectedSegmentLabel = selectedSegment
+    ? `${
+        selectedSegment.kind === "ingreso" ? "Ingreso" : "Gasto"
+      } ${selectedSegment.fijo ? "fijo" : "variable"} · ${
+        selectedSegment.category
+      }`
+    : null;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(1200px_circle_at_8%_-10%,rgba(15,118,110,0.2),transparent_60%),radial-gradient(900px_circle_at_110%_10%,rgba(251,146,60,0.2),transparent_55%)]">
@@ -1025,16 +1119,68 @@ export default function DashboardPage() {
                             </span>
                             <div className="flex h-40 w-10 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
                               <div
-                                className="bg-emerald-600"
+                                className={`bg-emerald-600 transition ${
+                                  row.fijo > 0
+                                    ? "cursor-pointer hover:opacity-80"
+                                    : "cursor-default"
+                                } ${
+                                  selectedSegment?.kind === "ingreso" &&
+                                  selectedSegment.fijo &&
+                                  selectedSegment.category === row.category
+                                    ? "ring-2 ring-emerald-300"
+                                    : ""
+                                }`}
                                 style={{
                                   height: `${(row.fijo / chartMax) * 100}%`,
                                 }}
+                                onClick={
+                                  row.fijo > 0
+                                    ? () =>
+                                        setSelectedSegment({
+                                          kind: "ingreso",
+                                          fijo: true,
+                                          category: row.category,
+                                        })
+                                    : undefined
+                                }
+                                role={row.fijo > 0 ? "button" : undefined}
+                                title={
+                                  row.fijo > 0
+                                    ? `Ingreso fijo · ${row.category}`
+                                    : undefined
+                                }
                               />
                               <div
-                                className="bg-emerald-300"
+                                className={`bg-emerald-300 transition ${
+                                  row.variable > 0
+                                    ? "cursor-pointer hover:opacity-80"
+                                    : "cursor-default"
+                                } ${
+                                  selectedSegment?.kind === "ingreso" &&
+                                  !selectedSegment.fijo &&
+                                  selectedSegment.category === row.category
+                                    ? "ring-2 ring-emerald-200"
+                                    : ""
+                                }`}
                                 style={{
                                   height: `${(row.variable / chartMax) * 100}%`,
                                 }}
+                                onClick={
+                                  row.variable > 0
+                                    ? () =>
+                                        setSelectedSegment({
+                                          kind: "ingreso",
+                                          fijo: false,
+                                          category: row.category,
+                                        })
+                                    : undefined
+                                }
+                                role={row.variable > 0 ? "button" : undefined}
+                                title={
+                                  row.variable > 0
+                                    ? `Ingreso variable · ${row.category}`
+                                    : undefined
+                                }
                               />
                             </div>
                             <span className="text-center text-[11px] leading-snug text-[var(--muted)]">
@@ -1062,16 +1208,68 @@ export default function DashboardPage() {
                             </span>
                             <div className="flex h-40 w-10 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
                               <div
-                                className="bg-rose-600"
+                                className={`bg-rose-600 transition ${
+                                  row.fijo > 0
+                                    ? "cursor-pointer hover:opacity-80"
+                                    : "cursor-default"
+                                } ${
+                                  selectedSegment?.kind === "gasto" &&
+                                  selectedSegment.fijo &&
+                                  selectedSegment.category === row.category
+                                    ? "ring-2 ring-rose-300"
+                                    : ""
+                                }`}
                                 style={{
                                   height: `${(row.fijo / chartMax) * 100}%`,
                                 }}
+                                onClick={
+                                  row.fijo > 0
+                                    ? () =>
+                                        setSelectedSegment({
+                                          kind: "gasto",
+                                          fijo: true,
+                                          category: row.category,
+                                        })
+                                    : undefined
+                                }
+                                role={row.fijo > 0 ? "button" : undefined}
+                                title={
+                                  row.fijo > 0
+                                    ? `Gasto fijo · ${row.category}`
+                                    : undefined
+                                }
                               />
                               <div
-                                className="bg-rose-300"
+                                className={`bg-rose-300 transition ${
+                                  row.variable > 0
+                                    ? "cursor-pointer hover:opacity-80"
+                                    : "cursor-default"
+                                } ${
+                                  selectedSegment?.kind === "gasto" &&
+                                  !selectedSegment.fijo &&
+                                  selectedSegment.category === row.category
+                                    ? "ring-2 ring-rose-200"
+                                    : ""
+                                }`}
                                 style={{
                                   height: `${(row.variable / chartMax) * 100}%`,
                                 }}
+                                onClick={
+                                  row.variable > 0
+                                    ? () =>
+                                        setSelectedSegment({
+                                          kind: "gasto",
+                                          fijo: false,
+                                          category: row.category,
+                                        })
+                                    : undefined
+                                }
+                                role={row.variable > 0 ? "button" : undefined}
+                                title={
+                                  row.variable > 0
+                                    ? `Gasto variable · ${row.category}`
+                                    : undefined
+                                }
                               />
                             </div>
                             <span className="text-center text-[11px] leading-snug text-[var(--muted)]">
@@ -1088,6 +1286,87 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
+            </section>
+
+            <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    Detalle
+                  </p>
+                  <h3
+                    className="mt-2 text-xl font-semibold text-[var(--foreground)]"
+                    style={{ fontFamily: "var(--font-fraunces)" }}
+                  >
+                    {selectedSegment ? selectedSegmentLabel : "Selecciona una barra"}
+                  </h3>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    {selectedSegment
+                      ? "Importes por detalle agrupados por mes."
+                      : "Haz clic en una barra para ver el desglose mensual."}
+                  </p>
+                </div>
+                {selectedSegment && (
+                  <button
+                    onClick={() => setSelectedSegment(null)}
+                    className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
+                  >
+                    Limpiar selección
+                  </button>
+                )}
+              </div>
+
+              {selectedSegment && (
+                <div className="mt-6 max-w-full overflow-x-auto pb-2">
+                  {detailGroups.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                      No hay detalles disponibles para esta selección.
+                    </div>
+                  ) : (
+                    <div className="flex min-w-max items-end gap-8">
+                      {detailGroups.map((group) => (
+                        <div
+                          key={group.monthIndex}
+                          className="flex flex-col items-center gap-3"
+                        >
+                          <div className="flex items-end gap-3">
+                            {group.items.map((item) => (
+                              <div
+                                key={`${group.monthIndex}-${item.detail}`}
+                                className="flex w-20 flex-col items-center gap-2"
+                              >
+                                <span className="text-[11px] font-semibold text-[var(--foreground)]">
+                                  {formatCurrency(item.total)}
+                                </span>
+                                <div className="flex h-36 w-8 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
+                                  <div
+                                    className={`${
+                                      selectedSegment.kind === "ingreso"
+                                        ? "bg-emerald-500"
+                                        : "bg-rose-500"
+                                    }`}
+                                    style={{
+                                      height: `${
+                                        (item.total / detailMax) * 100
+                                      }%`,
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-center text-[11px] leading-snug text-[var(--muted)]">
+                                  {item.detail}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <span className="text-[11px] uppercase tracking-[0.3em] text-[var(--muted)]">
+                            {group.monthLabel}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
           </div>
         )}
