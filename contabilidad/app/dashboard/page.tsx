@@ -54,6 +54,8 @@ export default function DashboardPage() {
   const [showGastosVariables, setShowGastosVariables] = useState(true);
   const [showChartFijos, setShowChartFijos] = useState(true);
   const [showChartVariables, setShowChartVariables] = useState(true);
+  const [searchIngresos, setSearchIngresos] = useState("");
+  const [searchGastos, setSearchGastos] = useState("");
   const [selectedSegment, setSelectedSegment] = useState<{
     kind: "ingreso" | "gasto";
     fijo: boolean;
@@ -276,6 +278,13 @@ export default function DashboardPage() {
   const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
 
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+
   const totals = useMemo(() => {
     let ingresos = 0;
     let gastos = 0;
@@ -403,17 +412,52 @@ export default function DashboardPage() {
     );
   }, [filteredGastos, selectedGastosCategory]);
 
+  const normalizeQuery = (value: string) =>
+    normalizeText(value).replace(/\s+/g, " ").trim();
+
+  const searchedIngresos = useMemo(() => {
+    const query = normalizeQuery(searchIngresos);
+    if (!query) return displayedIngresos;
+    return displayedIngresos.filter((mov) => {
+      const amount = Math.abs(Number(mov.importe ?? 0));
+      const amountNumber = new Intl.NumberFormat("es-ES", {
+        maximumFractionDigits: 2,
+      }).format(amount);
+      const amountCurrency = formatCurrency(amount);
+      const haystack = normalizeText(
+        `${mov.categoryName} ${mov.detailText ?? ""} ${amount} ${amountNumber} ${amountCurrency}`
+      );
+      return haystack.includes(query);
+    });
+  }, [displayedIngresos, searchIngresos, currency]);
+
+  const searchedGastos = useMemo(() => {
+    const query = normalizeQuery(searchGastos);
+    if (!query) return displayedGastos;
+    return displayedGastos.filter((mov) => {
+      const amount = Math.abs(Number(mov.importe ?? 0));
+      const amountNumber = new Intl.NumberFormat("es-ES", {
+        maximumFractionDigits: 2,
+      }).format(amount);
+      const amountCurrency = formatCurrency(amount);
+      const haystack = normalizeText(
+        `${mov.categoryName} ${mov.detailText ?? ""} ${amount} ${amountNumber} ${amountCurrency}`
+      );
+      return haystack.includes(query);
+    });
+  }, [displayedGastos, searchGastos, currency]);
+
   const filteredIngresosTotal = useMemo(() => {
-    return displayedIngresos.reduce((sum, mov) => {
+    return searchedIngresos.reduce((sum, mov) => {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
-  }, [displayedIngresos]);
+  }, [searchedIngresos]);
 
   const filteredGastosTotal = useMemo(() => {
-    return displayedGastos.reduce((sum, mov) => {
+    return searchedGastos.reduce((sum, mov) => {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
-  }, [displayedGastos]);
+  }, [searchedGastos]);
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -570,13 +614,6 @@ export default function DashboardPage() {
     if (totals.length === 0) return 1;
     return Math.max(1, ...totals);
   }, [detailGroups]);
-
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(value);
 
   const formatMovementAmount = (mov: {
     importe: number | null;
@@ -809,20 +846,23 @@ export default function DashboardPage() {
 
             <section className="grid gap-6 lg:grid-cols-2">
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex flex-col">
-                    <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                      Ingresos
-                    </p>
-                    <p
-                      className="mt-1 text-3xl font-semibold text-[var(--foreground)]"
-                      style={{ fontFamily: "var(--font-fraunces)" }}
-                    >
-                      {formatCurrency(filteredIngresosTotal)}
-                    </p>
-                  </div>
-                  <div className="ml-auto flex flex-col items-start gap-2 text-xs text-[var(--muted)]">
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                        Ingresos
+                      </p>
+                      <input
+                        type="search"
+                        className="h-7 w-32 rounded-full border border-black/10 bg-white px-3 text-xs text-[var(--foreground)] shadow-sm outline-none transition focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={searchIngresos}
+                        onChange={(event) =>
+                          setSearchIngresos(event.target.value)
+                        }
+                        placeholder="Filtrar..."
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -846,7 +886,15 @@ export default function DashboardPage() {
                         Variables
                       </label>
                     </div>
-                    <div className="flex items-center gap-2">
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p
+                      className="text-3xl font-semibold text-[var(--foreground)]"
+                      style={{ fontFamily: "var(--font-fraunces)" }}
+                    >
+                      {formatCurrency(filteredIngresosTotal)}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
                       <span>Categoría</span>
                       <select
                         className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
@@ -880,7 +928,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {displayedIngresos.length === 0 && (
+                      {searchedIngresos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -890,7 +938,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {displayedIngresos.map((mov) => (
+                      {searchedIngresos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -916,20 +964,21 @@ export default function DashboardPage() {
               </article>
 
               <article className="rounded-3xl border border-black/10 bg-[var(--surface)] p-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex flex-col">
-                    <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-                      Gastos
-                    </p>
-                    <p
-                      className="mt-1 text-3xl font-semibold text-[var(--foreground)]"
-                      style={{ fontFamily: "var(--font-fraunces)" }}
-                    >
-                      {formatCurrency(filteredGastosTotal)}
-                    </p>
-                  </div>
-                  <div className="ml-auto flex flex-col items-start gap-2 text-xs text-[var(--muted)]">
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                        Gastos
+                      </p>
+                      <input
+                        type="search"
+                        className="h-7 w-32 rounded-full border border-black/10 bg-white px-3 text-xs text-[var(--foreground)] shadow-sm outline-none transition focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={searchGastos}
+                        onChange={(event) => setSearchGastos(event.target.value)}
+                        placeholder="Filtrar..."
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -953,7 +1002,15 @@ export default function DashboardPage() {
                         Variables
                       </label>
                     </div>
-                    <div className="flex items-center gap-2">
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p
+                      className="text-3xl font-semibold text-[var(--foreground)]"
+                      style={{ fontFamily: "var(--font-fraunces)" }}
+                    >
+                      {formatCurrency(filteredGastosTotal)}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
                       <span>Categoría</span>
                       <select
                         className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
@@ -987,7 +1044,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {displayedGastos.length === 0 && (
+                      {searchedGastos.length === 0 && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -997,7 +1054,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {displayedGastos.map((mov) => (
+                      {searchedGastos.map((mov) => (
                         <tr
                           key={mov.id}
                           className="border-b border-black/5 last:border-b-0 dark:border-white/10"
