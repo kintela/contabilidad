@@ -56,6 +56,8 @@ export default function DashboardPage() {
   const [showChartVariables, setShowChartVariables] = useState(true);
   const [searchIngresos, setSearchIngresos] = useState("");
   const [searchGastos, setSearchGastos] = useState("");
+  const [groupIngresos, setGroupIngresos] = useState(true);
+  const [groupGastos, setGroupGastos] = useState(true);
   const [selectedSegment, setSelectedSegment] = useState<{
     kind: "ingreso" | "gasto";
     fijo: boolean;
@@ -184,21 +186,51 @@ export default function DashboardPage() {
 
     const loadYears = async () => {
       setMovimientosError(null);
-      const { data, error } = await supabase
-        .from("movimientos")
-        .select("fecha")
-        .eq("libro_id", selectedLibroId);
+      const pageSize = 500;
+      let from = 0;
+      const allRows: { fecha: string }[] = [];
+      let totalCount: number | null = null;
 
-      if (error) {
-        setMovimientosError(error.message);
-        setAvailableYears([]);
-        return;
+      while (true) {
+        const { data, error, count } = await supabase
+          .from("movimientos")
+          .select("fecha", { count: "exact" })
+          .eq("libro_id", selectedLibroId)
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          setMovimientosError(error.message);
+          setAvailableYears([]);
+          return;
+        }
+
+        if (totalCount === null && typeof count === "number") {
+          totalCount = count;
+        }
+
+        if (data && data.length > 0) {
+          allRows.push(...data);
+        }
+
+        if (!data || data.length === 0) break;
+        from += pageSize;
+
+        if (totalCount !== null && allRows.length >= totalCount) break;
+        if (data.length < pageSize && totalCount === null) break;
       }
 
       const years = Array.from(
         new Set(
-          (data ?? [])
-            .map((row) => new Date(row.fecha).getFullYear())
+          allRows
+            .map((row) => {
+              if (typeof row.fecha === "string") {
+                const rawYear = Number(row.fecha.slice(0, 4));
+                return Number.isFinite(rawYear)
+                  ? rawYear
+                  : new Date(row.fecha).getFullYear();
+              }
+              return new Date(row.fecha).getFullYear();
+            })
             .filter((year) => Number.isFinite(year))
         )
       ).sort((a, b) => b - a);
@@ -415,10 +447,12 @@ export default function DashboardPage() {
   const normalizeQuery = (value: string) =>
     normalizeText(value).replace(/\s+/g, " ").trim();
 
-  const searchedIngresos = useMemo(() => {
-    const query = normalizeQuery(searchIngresos);
-    if (!query) return displayedIngresos;
-    return displayedIngresos.filter((mov) => {
+  const filterMovementRows = (
+    rows: typeof displayedIngresos,
+    query: string
+  ) => {
+    if (!query) return rows;
+    return rows.filter((mov) => {
       const amount = Math.abs(Number(mov.importe ?? 0));
       const amountNumber = new Intl.NumberFormat("es-ES", {
         maximumFractionDigits: 2,
@@ -429,35 +463,126 @@ export default function DashboardPage() {
       );
       return haystack.includes(query);
     });
-  }, [displayedIngresos, searchIngresos, currency]);
+  };
 
-  const searchedGastos = useMemo(() => {
-    const query = normalizeQuery(searchGastos);
-    if (!query) return displayedGastos;
-    return displayedGastos.filter((mov) => {
+  type GroupedRow = {
+    key: string;
+    categoryName: string;
+    detailText: string;
+    total: number;
+    fijoLabel: "Sí" | "No" | "Mixto";
+  };
+
+  const buildGroupedRows = (rows: typeof displayedIngresos): GroupedRow[] => {
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        categoryName: string;
+        detailText: string;
+        total: number;
+        hasFijo: boolean;
+        hasVariable: boolean;
+      }
+    >();
+
+    rows.forEach((mov) => {
+      const categoryName = mov.categoryName;
+      const detailText = mov.detailText ?? "—";
+      const key = `${categoryName}||${detailText}`;
+      const existing = grouped.get(key) ?? {
+        key,
+        categoryName,
+        detailText,
+        total: 0,
+        hasFijo: false,
+        hasVariable: false,
+      };
+
       const amount = Math.abs(Number(mov.importe ?? 0));
+      const isFijo = mov.fijo === true;
+      existing.total += amount;
+      if (isFijo) {
+        existing.hasFijo = true;
+      } else {
+        existing.hasVariable = true;
+      }
+
+      grouped.set(key, existing);
+    });
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        key: row.key,
+        categoryName: row.categoryName,
+        detailText: row.detailText,
+        total: row.total,
+        fijoLabel: row.hasFijo && row.hasVariable ? "Mixto" : row.hasFijo ? "Sí" : "No",
+      }))
+      .sort((a, b) => b.total - a.total);
+  };
+
+  const filterGroupedRows = (rows: GroupedRow[], query: string) => {
+    if (!query) return rows;
+    return rows.filter((row) => {
       const amountNumber = new Intl.NumberFormat("es-ES", {
         maximumFractionDigits: 2,
-      }).format(amount);
-      const amountCurrency = formatCurrency(amount);
+      }).format(row.total);
+      const amountCurrency = formatCurrency(row.total);
       const haystack = normalizeText(
-        `${mov.categoryName} ${mov.detailText ?? ""} ${amount} ${amountNumber} ${amountCurrency}`
+        `${row.categoryName} ${row.detailText} ${row.total} ${amountNumber} ${amountCurrency}`
       );
       return haystack.includes(query);
     });
-  }, [displayedGastos, searchGastos, currency]);
+  };
+
+  const groupedIngresos = useMemo(
+    () => buildGroupedRows(displayedIngresos),
+    [displayedIngresos]
+  );
+  const groupedGastos = useMemo(
+    () => buildGroupedRows(displayedGastos),
+    [displayedGastos]
+  );
+
+  const ingresosQuery = normalizeQuery(searchIngresos);
+  const gastosQuery = normalizeQuery(searchGastos);
+
+  const searchedIngresosMovs = useMemo(
+    () => filterMovementRows(displayedIngresos, ingresosQuery),
+    [displayedIngresos, ingresosQuery, currency]
+  );
+  const searchedGastosMovs = useMemo(
+    () => filterMovementRows(displayedGastos, gastosQuery),
+    [displayedGastos, gastosQuery, currency]
+  );
+
+  const searchedIngresosGrouped = useMemo(
+    () => filterGroupedRows(groupedIngresos, ingresosQuery),
+    [groupedIngresos, ingresosQuery, currency]
+  );
+  const searchedGastosGrouped = useMemo(
+    () => filterGroupedRows(groupedGastos, gastosQuery),
+    [groupedGastos, gastosQuery, currency]
+  );
 
   const filteredIngresosTotal = useMemo(() => {
-    return searchedIngresos.reduce((sum, mov) => {
+    if (groupIngresos) {
+      return searchedIngresosGrouped.reduce((sum, row) => sum + row.total, 0);
+    }
+    return searchedIngresosMovs.reduce((sum, mov) => {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
-  }, [searchedIngresos]);
+  }, [groupIngresos, searchedIngresosGrouped, searchedIngresosMovs]);
 
   const filteredGastosTotal = useMemo(() => {
-    return searchedGastos.reduce((sum, mov) => {
+    if (groupGastos) {
+      return searchedGastosGrouped.reduce((sum, row) => sum + row.total, 0);
+    }
+    return searchedGastosMovs.reduce((sum, mov) => {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
-  }, [searchedGastos]);
+  }, [groupGastos, searchedGastosGrouped, searchedGastosMovs]);
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -861,6 +986,17 @@ export default function DashboardPage() {
                         }
                         placeholder="Filtrar..."
                       />
+                      <label className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={groupIngresos}
+                          onChange={(event) =>
+                            setGroupIngresos(event.target.checked)
+                          }
+                        />
+                        Agrupar
+                      </label>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
@@ -928,7 +1064,9 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {searchedIngresos.length === 0 && (
+                      {(groupIngresos
+                        ? searchedIngresosGrouped.length === 0
+                        : searchedIngresosMovs.length === 0) && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -938,26 +1076,41 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {searchedIngresos.map((mov) => (
-                        <tr
-                          key={mov.id}
-                          className="border-b border-black/5 last:border-b-0 dark:border-white/10"
-                        >
-                          <td className="px-3 py-2">
-                            {formatDate(mov.fecha)}
-                          </td>
-                          <td className="px-3 py-2">{mov.categoryName}</td>
-                          <td className="px-3 py-2">
-                            {mov.detailText ?? "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            {mov.fijo === true ? "Sí" : "No"}
-                          </td>
-                          <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
-                            {formatMovementAmount(mov)}
-                          </td>
-                        </tr>
-                      ))}
+                      {groupIngresos
+                        ? searchedIngresosGrouped.map((row) => (
+                            <tr
+                              key={row.key}
+                              className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                            >
+                              <td className="px-3 py-2">—</td>
+                              <td className="px-3 py-2">{row.categoryName}</td>
+                              <td className="px-3 py-2">{row.detailText}</td>
+                              <td className="px-3 py-2">{row.fijoLabel}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                                {formatCurrency(row.total)}
+                              </td>
+                            </tr>
+                          ))
+                        : searchedIngresosMovs.map((mov) => (
+                            <tr
+                              key={mov.id}
+                              className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                            >
+                              <td className="px-3 py-2">
+                                {formatDate(mov.fecha)}
+                              </td>
+                              <td className="px-3 py-2">{mov.categoryName}</td>
+                              <td className="px-3 py-2">
+                                {mov.detailText ?? "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {mov.fijo === true ? "Sí" : "No"}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                                {formatMovementAmount(mov)}
+                              </td>
+                            </tr>
+                          ))}
                     </tbody>
                   </table>
                 </div>
@@ -977,6 +1130,17 @@ export default function DashboardPage() {
                         onChange={(event) => setSearchGastos(event.target.value)}
                         placeholder="Filtrar..."
                       />
+                      <label className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={groupGastos}
+                          onChange={(event) =>
+                            setGroupGastos(event.target.checked)
+                          }
+                        />
+                        Agrupar
+                      </label>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
@@ -1044,7 +1208,9 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {searchedGastos.length === 0 && (
+                      {(groupGastos
+                        ? searchedGastosGrouped.length === 0
+                        : searchedGastosMovs.length === 0) && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -1054,26 +1220,44 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {searchedGastos.map((mov) => (
-                        <tr
-                          key={mov.id}
-                          className="border-b border-black/5 last:border-b-0 dark:border-white/10"
-                        >
-                          <td className="px-3 py-2">
-                            {formatDate(mov.fecha)}
-                          </td>
-                          <td className="px-3 py-2">{mov.categoryName}</td>
-                          <td className="px-3 py-2">
-                            {mov.detailText ?? "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            {mov.fijo === true ? "Sí" : "No"}
-                          </td>
-                          <td className="px-3 py-2 text-right font-semibold text-rose-600 dark:text-rose-400">
-                            {formatMovementAmount(mov)}
-                          </td>
-                        </tr>
-                      ))}
+                      {groupGastos
+                        ? searchedGastosGrouped.map((row) => (
+                            <tr
+                              key={row.key}
+                              className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                            >
+                              <td className="px-3 py-2">—</td>
+                              <td className="px-3 py-2">{row.categoryName}</td>
+                              <td className="px-3 py-2">{row.detailText}</td>
+                              <td className="px-3 py-2">{row.fijoLabel}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-rose-600 dark:text-rose-400">
+                                {formatMovementAmount({
+                                  importe: row.total,
+                                  kind: "gasto",
+                                })}
+                              </td>
+                            </tr>
+                          ))
+                        : searchedGastosMovs.map((mov) => (
+                            <tr
+                              key={mov.id}
+                              className="border-b border-black/5 last:border-b-0 dark:border-white/10"
+                            >
+                              <td className="px-3 py-2">
+                                {formatDate(mov.fecha)}
+                              </td>
+                              <td className="px-3 py-2">{mov.categoryName}</td>
+                              <td className="px-3 py-2">
+                                {mov.detailText ?? "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {mov.fijo === true ? "Sí" : "No"}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-rose-600 dark:text-rose-400">
+                                {formatMovementAmount(mov)}
+                              </td>
+                            </tr>
+                          ))}
                     </tbody>
                   </table>
                 </div>
