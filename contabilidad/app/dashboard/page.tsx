@@ -533,14 +533,18 @@ export default function DashboardPage() {
     });
 
     return Array.from(grouped.values())
-      .map((row) => ({
-        key: row.key,
-        categoryName: row.categoryName,
-        detailText: row.detailText,
-        total: row.total,
-        fijoLabel: row.hasFijo && row.hasVariable ? "Mixto" : row.hasFijo ? "Sí" : "No",
-        latestDate: row.latestDate,
-      }))
+      .map((row) => {
+        const fijoLabel: GroupedRow["fijoLabel"] =
+          row.hasFijo && row.hasVariable ? "Mixto" : row.hasFijo ? "Sí" : "No";
+        return {
+          key: row.key,
+          categoryName: row.categoryName,
+          detailText: row.detailText,
+          total: row.total,
+          fijoLabel,
+          latestDate: row.latestDate,
+        };
+      })
       .sort((a, b) => b.total - a.total);
   };
 
