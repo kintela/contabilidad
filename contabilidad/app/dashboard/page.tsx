@@ -21,6 +21,10 @@ type Movimiento = {
   categoria_nombre?: string | null;
 };
 
+type SortKey = "fecha" | "categoria" | "detalle" | "fijo" | "importe";
+type SortDirection = "asc" | "desc";
+type SortState = { key: SortKey; direction: SortDirection };
+
 const CURRENT_YEAR = new Date().getFullYear();
 
 const normalizeText = (value: string) =>
@@ -58,6 +62,14 @@ export default function DashboardPage() {
   const [searchGastos, setSearchGastos] = useState("");
   const [groupIngresos, setGroupIngresos] = useState(true);
   const [groupGastos, setGroupGastos] = useState(true);
+  const [sortIngresos, setSortIngresos] = useState<SortState>({
+    key: "importe",
+    direction: "desc",
+  });
+  const [sortGastos, setSortGastos] = useState<SortState>({
+    key: "importe",
+    direction: "desc",
+  });
   const [selectedSegment, setSelectedSegment] = useState<{
     kind: "ingreso" | "gasto";
     fijo: boolean;
@@ -471,6 +483,7 @@ export default function DashboardPage() {
     detailText: string;
     total: number;
     fijoLabel: "Sí" | "No" | "Mixto";
+    latestDate: number;
   };
 
   const buildGroupedRows = (rows: typeof displayedIngresos): GroupedRow[] => {
@@ -483,12 +496,16 @@ export default function DashboardPage() {
         total: number;
         hasFijo: boolean;
         hasVariable: boolean;
+        latestDate: number;
       }
     >();
 
     rows.forEach((mov) => {
       const categoryName = mov.categoryName;
       const detailText = mov.detailText ?? "—";
+      const movementDate = Number.isFinite(Date.parse(mov.fecha))
+        ? Date.parse(mov.fecha)
+        : 0;
       const key = `${categoryName}||${detailText}`;
       const existing = grouped.get(key) ?? {
         key,
@@ -497,6 +514,7 @@ export default function DashboardPage() {
         total: 0,
         hasFijo: false,
         hasVariable: false,
+        latestDate: 0,
       };
 
       const amount = Math.abs(Number(mov.importe ?? 0));
@@ -506,6 +524,9 @@ export default function DashboardPage() {
         existing.hasFijo = true;
       } else {
         existing.hasVariable = true;
+      }
+      if (movementDate > existing.latestDate) {
+        existing.latestDate = movementDate;
       }
 
       grouped.set(key, existing);
@@ -518,6 +539,7 @@ export default function DashboardPage() {
         detailText: row.detailText,
         total: row.total,
         fijoLabel: row.hasFijo && row.hasVariable ? "Mixto" : row.hasFijo ? "Sí" : "No",
+        latestDate: row.latestDate,
       }))
       .sort((a, b) => b.total - a.total);
   };
@@ -583,6 +605,157 @@ export default function DashboardPage() {
       return sum + Math.abs(Number(mov.importe ?? 0));
     }, 0);
   }, [groupGastos, searchedGastosGrouped, searchedGastosMovs]);
+
+  const toggleSort = (
+    setter: (value: SortState | ((prev: SortState) => SortState)) => void,
+    current: SortState,
+    nextKey: SortKey
+  ) => {
+    if (current.key === nextKey) {
+      setter({
+        key: nextKey,
+        direction: current.direction === "asc" ? "desc" : "asc",
+      });
+      return;
+    }
+    setter({
+      key: nextKey,
+      direction: nextKey === "importe" ? "desc" : "asc",
+    });
+  };
+
+  const compareText = (a: string, b: string) =>
+    a.localeCompare(b, "es-ES", { sensitivity: "base" });
+
+  const sortMovements = (rows: typeof searchedIngresosMovs, sort: SortState) => {
+    const sorted = rows.map((row, index) => ({ row, index }));
+    sorted.sort((a, b) => {
+      const getValue = (mov: typeof searchedIngresosMovs[number]) => {
+        switch (sort.key) {
+          case "fecha":
+            return Date.parse(mov.fecha) || 0;
+          case "categoria":
+            return mov.categoryName;
+          case "detalle":
+            return mov.detailText ?? "";
+          case "fijo":
+            return mov.fijo === true ? 1 : 0;
+          case "importe":
+          default:
+            return Math.abs(Number(mov.importe ?? 0));
+        }
+      };
+
+      const valueA = getValue(a.row);
+      const valueB = getValue(b.row);
+      let result = 0;
+
+      if (typeof valueA === "number" && typeof valueB === "number") {
+        result = valueA - valueB;
+      } else {
+        result = compareText(String(valueA), String(valueB));
+      }
+
+      if (sort.direction === "desc") {
+        result *= -1;
+      }
+
+      if (result === 0 && sort.key !== "importe") {
+        const secondary =
+          Math.abs(Number(b.row.importe ?? 0)) -
+          Math.abs(Number(a.row.importe ?? 0));
+        if (secondary !== 0) return secondary;
+      }
+
+      return result !== 0 ? result : a.index - b.index;
+    });
+    return sorted.map(({ row }) => row);
+  };
+
+  const sortGrouped = (rows: GroupedRow[], sort: SortState) => {
+    const fijoRank = (label: GroupedRow["fijoLabel"]) => {
+      if (label === "Sí") return 2;
+      if (label === "Mixto") return 1;
+      return 0;
+    };
+    const sorted = rows.map((row, index) => ({ row, index }));
+    sorted.sort((a, b) => {
+      const getValue = (row: GroupedRow) => {
+        switch (sort.key) {
+          case "fecha":
+            return row.latestDate;
+          case "categoria":
+            return row.categoryName;
+          case "detalle":
+            return row.detailText;
+          case "fijo":
+            return fijoRank(row.fijoLabel);
+          case "importe":
+          default:
+            return row.total;
+        }
+      };
+
+      const valueA = getValue(a.row);
+      const valueB = getValue(b.row);
+      let result = 0;
+
+      if (typeof valueA === "number" && typeof valueB === "number") {
+        result = valueA - valueB;
+      } else {
+        result = compareText(String(valueA), String(valueB));
+      }
+
+      if (sort.direction === "desc") {
+        result *= -1;
+      }
+
+      if (result === 0 && sort.key !== "importe") {
+        const secondary = b.row.total - a.row.total;
+        if (secondary !== 0) return secondary;
+      }
+
+      return result !== 0 ? result : a.index - b.index;
+    });
+    return sorted.map(({ row }) => row);
+  };
+
+  const sortedIngresosMovs = useMemo(
+    () => sortMovements(searchedIngresosMovs, sortIngresos),
+    [searchedIngresosMovs, sortIngresos]
+  );
+  const sortedGastosMovs = useMemo(
+    () => sortMovements(searchedGastosMovs, sortGastos),
+    [searchedGastosMovs, sortGastos]
+  );
+  const sortedIngresosGrouped = useMemo(
+    () => sortGrouped(searchedIngresosGrouped, sortIngresos),
+    [searchedIngresosGrouped, sortIngresos]
+  );
+  const sortedGastosGrouped = useMemo(
+    () => sortGrouped(searchedGastosGrouped, sortGastos),
+    [searchedGastosGrouped, sortGastos]
+  );
+
+  const SortArrow = ({
+    active,
+    direction,
+  }: {
+    active: boolean;
+    direction: SortDirection;
+  }) => (
+    <svg
+      className={`h-2 w-2 ${
+        active
+          ? "text-[var(--accent)]"
+          : "text-black/30 dark:text-white/30"
+      } ${active && direction === "asc" ? "rotate-180" : ""}`}
+      viewBox="0 0 10 6"
+      aria-hidden="true"
+    >
+      <path d="M0 0h10L5 6z" fill="currentColor" />
+    </svg>
+  );
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -1054,19 +1227,119 @@ export default function DashboardPage() {
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
-                        <th className="px-3 py-2 font-semibold">Fecha</th>
-                        <th className="px-3 py-2 font-semibold">Categoría</th>
-                        <th className="px-3 py-2 font-semibold">Detalle</th>
-                        <th className="px-3 py-2 font-semibold">Fijo</th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(setSortIngresos, sortIngresos, "fecha")
+                            }
+                          >
+                            <span>Fecha</span>
+                            <SortArrow
+                              active={sortIngresos.key === "fecha"}
+                              direction={
+                                sortIngresos.key === "fecha"
+                                  ? sortIngresos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(
+                                setSortIngresos,
+                                sortIngresos,
+                                "categoria"
+                              )
+                            }
+                          >
+                            <span>Categoría</span>
+                            <SortArrow
+                              active={sortIngresos.key === "categoria"}
+                              direction={
+                                sortIngresos.key === "categoria"
+                                  ? sortIngresos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(
+                                setSortIngresos,
+                                sortIngresos,
+                                "detalle"
+                              )
+                            }
+                          >
+                            <span>Detalle</span>
+                            <SortArrow
+                              active={sortIngresos.key === "detalle"}
+                              direction={
+                                sortIngresos.key === "detalle"
+                                  ? sortIngresos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(setSortIngresos, sortIngresos, "fijo")
+                            }
+                          >
+                            <span>Fijo</span>
+                            <SortArrow
+                              active={sortIngresos.key === "fijo"}
+                              direction={
+                                sortIngresos.key === "fijo"
+                                  ? sortIngresos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
                         <th className="px-3 py-2 text-right font-semibold">
-                          Importe
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-end gap-1"
+                            onClick={() =>
+                              toggleSort(
+                                setSortIngresos,
+                                sortIngresos,
+                                "importe"
+                              )
+                            }
+                          >
+                            <span>Importe</span>
+                            <SortArrow
+                              active={sortIngresos.key === "importe"}
+                              direction={
+                                sortIngresos.key === "importe"
+                                  ? sortIngresos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
                         </th>
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
                       {(groupIngresos
-                        ? searchedIngresosGrouped.length === 0
-                        : searchedIngresosMovs.length === 0) && (
+                        ? sortedIngresosGrouped.length === 0
+                        : sortedIngresosMovs.length === 0) && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -1077,7 +1350,7 @@ export default function DashboardPage() {
                         </tr>
                       )}
                       {groupIngresos
-                        ? searchedIngresosGrouped.map((row) => (
+                        ? sortedIngresosGrouped.map((row) => (
                             <tr
                               key={row.key}
                               className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -1091,7 +1364,7 @@ export default function DashboardPage() {
                               </td>
                             </tr>
                           ))
-                        : searchedIngresosMovs.map((mov) => (
+                        : sortedIngresosMovs.map((mov) => (
                             <tr
                               key={mov.id}
                               className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -1198,19 +1471,115 @@ export default function DashboardPage() {
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
                       <tr className="border-b border-black/5 dark:border-white/10">
-                        <th className="px-3 py-2 font-semibold">Fecha</th>
-                        <th className="px-3 py-2 font-semibold">Categoría</th>
-                        <th className="px-3 py-2 font-semibold">Detalle</th>
-                        <th className="px-3 py-2 font-semibold">Fijo</th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(setSortGastos, sortGastos, "fecha")
+                            }
+                          >
+                            <span>Fecha</span>
+                            <SortArrow
+                              active={sortGastos.key === "fecha"}
+                              direction={
+                                sortGastos.key === "fecha"
+                                  ? sortGastos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(
+                                setSortGastos,
+                                sortGastos,
+                                "categoria"
+                              )
+                            }
+                          >
+                            <span>Categoría</span>
+                            <SortArrow
+                              active={sortGastos.key === "categoria"}
+                              direction={
+                                sortGastos.key === "categoria"
+                                  ? sortGastos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(
+                                setSortGastos,
+                                sortGastos,
+                                "detalle"
+                              )
+                            }
+                          >
+                            <span>Detalle</span>
+                            <SortArrow
+                              active={sortGastos.key === "detalle"}
+                              direction={
+                                sortGastos.key === "detalle"
+                                  ? sortGastos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
+                        <th className="px-3 py-2 font-semibold">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1"
+                            onClick={() =>
+                              toggleSort(setSortGastos, sortGastos, "fijo")
+                            }
+                          >
+                            <span>Fijo</span>
+                            <SortArrow
+                              active={sortGastos.key === "fijo"}
+                              direction={
+                                sortGastos.key === "fijo"
+                                  ? sortGastos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
+                        </th>
                         <th className="px-3 py-2 text-right font-semibold">
-                          Importe
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-end gap-1"
+                            onClick={() =>
+                              toggleSort(setSortGastos, sortGastos, "importe")
+                            }
+                          >
+                            <span>Importe</span>
+                            <SortArrow
+                              active={sortGastos.key === "importe"}
+                              direction={
+                                sortGastos.key === "importe"
+                                  ? sortGastos.direction
+                                  : "desc"
+                              }
+                            />
+                          </button>
                         </th>
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
                       {(groupGastos
-                        ? searchedGastosGrouped.length === 0
-                        : searchedGastosMovs.length === 0) && (
+                        ? sortedGastosGrouped.length === 0
+                        : sortedGastosMovs.length === 0) && (
                         <tr>
                           <td
                             className="px-3 py-3 text-center text-[var(--muted)]"
@@ -1221,7 +1590,7 @@ export default function DashboardPage() {
                         </tr>
                       )}
                       {groupGastos
-                        ? searchedGastosGrouped.map((row) => (
+                        ? sortedGastosGrouped.map((row) => (
                             <tr
                               key={row.key}
                               className="border-b border-black/5 last:border-b-0 dark:border-white/10"
@@ -1238,7 +1607,7 @@ export default function DashboardPage() {
                               </td>
                             </tr>
                           ))
-                        : searchedGastosMovs.map((mov) => (
+                        : sortedGastosMovs.map((mov) => (
                             <tr
                               key={mov.id}
                               className="border-b border-black/5 last:border-b-0 dark:border-white/10"
