@@ -33,6 +33,26 @@ const normalizeText = (value: string) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
+const SortArrow = ({
+  active,
+  direction,
+}: {
+  active: boolean;
+  direction: SortDirection;
+}) => (
+  <svg
+    className={`h-2 w-2 ${
+      active
+        ? "text-[var(--accent)]"
+        : "text-black/30 dark:text-white/30"
+    } ${active && direction === "asc" ? "rotate-180" : ""}`}
+    viewBox="0 0 10 6"
+    aria-hidden="true"
+  >
+    <path d="M0 0h10L5 6z" fill="currentColor" />
+  </svg>
+);
+
 export default function DashboardPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -103,7 +123,14 @@ export default function DashboardPage() {
       if (error) {
         setAuthError(error.message);
       }
-      setSession(data.session ?? null);
+      const nextSession = data.session ?? null;
+      setSession(nextSession);
+      if (!nextSession) {
+        setLibros([]);
+        setSelectedLibroId(null);
+        setAvailableYears([]);
+        setMovimientos([]);
+      }
       setSessionLoading(false);
     });
 
@@ -113,6 +140,12 @@ export default function DashboardPage() {
         setSession(nextSession);
         setSessionLoading(false);
         setSignInLoading(false);
+        if (!nextSession) {
+          setLibros([]);
+          setSelectedLibroId(null);
+          setAvailableYears([]);
+          setMovimientos([]);
+        }
       }
     );
 
@@ -121,14 +154,6 @@ export default function DashboardPage() {
       authListener.subscription?.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    if (session) return;
-    setLibros([]);
-    setSelectedLibroId(null);
-    setAvailableYears([]);
-    setMovimientos([]);
-  }, [session]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -288,7 +313,7 @@ export default function DashboardPage() {
         )
       ) as string[];
 
-      let categoriaMap = new Map<string, string | null>();
+      const categoriaMap = new Map<string, string | null>();
 
       if (categoriaIds.length > 0) {
         const { data: categoriasData, error: categoriasError } = await supabase
@@ -424,37 +449,31 @@ export default function DashboardPage() {
     ).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [filteredGastos]);
 
-  useEffect(() => {
-    if (
-      selectedIngresosCategory !== "todas" &&
-      !ingresoCategories.includes(selectedIngresosCategory)
-    ) {
-      setSelectedIngresosCategory("todas");
-    }
-  }, [ingresoCategories, selectedIngresosCategory]);
+  const safeSelectedIngresosCategory =
+    selectedIngresosCategory === "todas" ||
+    ingresoCategories.includes(selectedIngresosCategory)
+      ? selectedIngresosCategory
+      : "todas";
 
-  useEffect(() => {
-    if (
-      selectedGastosCategory !== "todas" &&
-      !gastoCategories.includes(selectedGastosCategory)
-    ) {
-      setSelectedGastosCategory("todas");
-    }
-  }, [gastoCategories, selectedGastosCategory]);
+  const safeSelectedGastosCategory =
+    selectedGastosCategory === "todas" ||
+    gastoCategories.includes(selectedGastosCategory)
+      ? selectedGastosCategory
+      : "todas";
 
   const displayedIngresos = useMemo(() => {
-    if (selectedIngresosCategory === "todas") return filteredIngresos;
+    if (safeSelectedIngresosCategory === "todas") return filteredIngresos;
     return filteredIngresos.filter(
-      (mov) => mov.categoryName === selectedIngresosCategory
+      (mov) => mov.categoryName === safeSelectedIngresosCategory
     );
-  }, [filteredIngresos, selectedIngresosCategory]);
+  }, [filteredIngresos, safeSelectedIngresosCategory]);
 
   const displayedGastos = useMemo(() => {
-    if (selectedGastosCategory === "todas") return filteredGastos;
+    if (safeSelectedGastosCategory === "todas") return filteredGastos;
     return filteredGastos.filter(
-      (mov) => mov.categoryName === selectedGastosCategory
+      (mov) => mov.categoryName === safeSelectedGastosCategory
     );
-  }, [filteredGastos, selectedGastosCategory]);
+  }, [filteredGastos, safeSelectedGastosCategory]);
 
   const normalizeQuery = (value: string) =>
     normalizeText(value).replace(/\s+/g, " ").trim();
@@ -562,53 +581,35 @@ export default function DashboardPage() {
     });
   };
 
-  const groupedIngresos = useMemo(
-    () => buildGroupedRows(displayedIngresos),
-    [displayedIngresos]
-  );
-  const groupedGastos = useMemo(
-    () => buildGroupedRows(displayedGastos),
-    [displayedGastos]
-  );
+  const groupedIngresos = buildGroupedRows(displayedIngresos);
+  const groupedGastos = buildGroupedRows(displayedGastos);
 
   const ingresosQuery = normalizeQuery(searchIngresos);
   const gastosQuery = normalizeQuery(searchGastos);
 
-  const searchedIngresosMovs = useMemo(
-    () => filterMovementRows(displayedIngresos, ingresosQuery),
-    [displayedIngresos, ingresosQuery, currency]
+  const searchedIngresosMovs = filterMovementRows(
+    displayedIngresos,
+    ingresosQuery
   );
-  const searchedGastosMovs = useMemo(
-    () => filterMovementRows(displayedGastos, gastosQuery),
-    [displayedGastos, gastosQuery, currency]
-  );
+  const searchedGastosMovs = filterMovementRows(displayedGastos, gastosQuery);
 
-  const searchedIngresosGrouped = useMemo(
-    () => filterGroupedRows(groupedIngresos, ingresosQuery),
-    [groupedIngresos, ingresosQuery, currency]
+  const searchedIngresosGrouped = filterGroupedRows(
+    groupedIngresos,
+    ingresosQuery
   );
-  const searchedGastosGrouped = useMemo(
-    () => filterGroupedRows(groupedGastos, gastosQuery),
-    [groupedGastos, gastosQuery, currency]
-  );
+  const searchedGastosGrouped = filterGroupedRows(groupedGastos, gastosQuery);
 
-  const filteredIngresosTotal = useMemo(() => {
-    if (groupIngresos) {
-      return searchedIngresosGrouped.reduce((sum, row) => sum + row.total, 0);
-    }
-    return searchedIngresosMovs.reduce((sum, mov) => {
-      return sum + Math.abs(Number(mov.importe ?? 0));
-    }, 0);
-  }, [groupIngresos, searchedIngresosGrouped, searchedIngresosMovs]);
+  const filteredIngresosTotal = groupIngresos
+    ? searchedIngresosGrouped.reduce((sum, row) => sum + row.total, 0)
+    : searchedIngresosMovs.reduce((sum, mov) => {
+        return sum + Math.abs(Number(mov.importe ?? 0));
+      }, 0);
 
-  const filteredGastosTotal = useMemo(() => {
-    if (groupGastos) {
-      return searchedGastosGrouped.reduce((sum, row) => sum + row.total, 0);
-    }
-    return searchedGastosMovs.reduce((sum, mov) => {
-      return sum + Math.abs(Number(mov.importe ?? 0));
-    }, 0);
-  }, [groupGastos, searchedGastosGrouped, searchedGastosMovs]);
+  const filteredGastosTotal = groupGastos
+    ? searchedGastosGrouped.reduce((sum, row) => sum + row.total, 0)
+    : searchedGastosMovs.reduce((sum, mov) => {
+        return sum + Math.abs(Number(mov.importe ?? 0));
+      }, 0);
 
   const toggleSort = (
     setter: (value: SortState | ((prev: SortState) => SortState)) => void,
@@ -724,42 +725,16 @@ export default function DashboardPage() {
     return sorted.map(({ row }) => row);
   };
 
-  const sortedIngresosMovs = useMemo(
-    () => sortMovements(searchedIngresosMovs, sortIngresos),
-    [searchedIngresosMovs, sortIngresos]
+  const sortedIngresosMovs = sortMovements(
+    searchedIngresosMovs,
+    sortIngresos
   );
-  const sortedGastosMovs = useMemo(
-    () => sortMovements(searchedGastosMovs, sortGastos),
-    [searchedGastosMovs, sortGastos]
+  const sortedGastosMovs = sortMovements(searchedGastosMovs, sortGastos);
+  const sortedIngresosGrouped = sortGrouped(
+    searchedIngresosGrouped,
+    sortIngresos
   );
-  const sortedIngresosGrouped = useMemo(
-    () => sortGrouped(searchedIngresosGrouped, sortIngresos),
-    [searchedIngresosGrouped, sortIngresos]
-  );
-  const sortedGastosGrouped = useMemo(
-    () => sortGrouped(searchedGastosGrouped, sortGastos),
-    [searchedGastosGrouped, sortGastos]
-  );
-
-  const SortArrow = ({
-    active,
-    direction,
-  }: {
-    active: boolean;
-    direction: SortDirection;
-  }) => (
-    <svg
-      className={`h-2 w-2 ${
-        active
-          ? "text-[var(--accent)]"
-          : "text-black/30 dark:text-white/30"
-      } ${active && direction === "asc" ? "rotate-180" : ""}`}
-      viewBox="0 0 10 6"
-      aria-hidden="true"
-    >
-      <path d="M0 0h10L5 6z" fill="currentColor" />
-    </svg>
-  );
+  const sortedGastosGrouped = sortGrouped(searchedGastosGrouped, sortGastos);
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -836,8 +811,8 @@ export default function DashboardPage() {
     (chartData.ingresos.length > 0 && chartData.gastos.length > 0 ? 1 : 0);
   const chartMinWidth = Math.max(8, chartColumnCount) * chartColumnWidth;
 
-  useEffect(() => {
-    if (!selectedSegment) return;
+  const activeSelectedSegment = useMemo(() => {
+    if (!selectedSegment) return null;
     const source =
       selectedSegment.kind === "ingreso"
         ? chartData.ingresos
@@ -852,26 +827,28 @@ export default function DashboardPage() {
       : 0;
 
     if (!matching || segmentValue === 0) {
-      setSelectedSegment(null);
+      return null;
     }
+
+    return selectedSegment;
   }, [chartData, selectedSegment]);
 
   const selectedMovimientos = useMemo(() => {
-    if (!selectedSegment) return [];
+    if (!activeSelectedSegment) return [];
     const source =
-      selectedSegment.kind === "ingreso"
+      activeSelectedSegment.kind === "ingreso"
         ? movimientoRows.ingresos
         : movimientoRows.gastos;
 
     return source.filter((mov) => {
       const isFijo = mov.fijo === true;
-      const matchesFijo = selectedSegment.fijo ? isFijo : !isFijo;
+      const matchesFijo = activeSelectedSegment.fijo ? isFijo : !isFijo;
       return (
-        mov.categoryName === selectedSegment.category &&
+        mov.categoryName === activeSelectedSegment.category &&
         matchesFijo
       );
     });
-  }, [movimientoRows, selectedSegment]);
+  }, [movimientoRows, activeSelectedSegment]);
 
   const monthLabels = useMemo(() => {
     const formatter = new Intl.DateTimeFormat("es-ES", { month: "short" });
@@ -881,7 +858,7 @@ export default function DashboardPage() {
   }, [selectedYear]);
 
   const detailGroups = useMemo(() => {
-    if (!selectedSegment) return [];
+    if (!activeSelectedSegment) return [];
 
     const byMonth = Array.from({ length: 12 }, () => new Map<string, number>());
 
@@ -907,7 +884,7 @@ export default function DashboardPage() {
         };
       })
       .filter((group) => group.total > 0);
-  }, [monthLabels, selectedMovimientos, selectedSegment]);
+  }, [monthLabels, selectedMovimientos, activeSelectedSegment]);
 
   const detailMax = useMemo(() => {
     const totals = detailGroups.flatMap((group) =>
@@ -947,11 +924,11 @@ export default function DashboardPage() {
     await supabase.auth.signOut();
   };
 
-  const selectedSegmentLabel = selectedSegment
+  const selectedSegmentLabel = activeSelectedSegment
     ? `${
-        selectedSegment.kind === "ingreso" ? "Ingreso" : "Gasto"
-      } ${selectedSegment.fijo ? "fijo" : "variable"} · ${
-        selectedSegment.category
+        activeSelectedSegment.kind === "ingreso" ? "Ingreso" : "Gasto"
+      } ${activeSelectedSegment.fijo ? "fijo" : "variable"} · ${
+        activeSelectedSegment.category
       }`
     : null;
 
@@ -1211,7 +1188,7 @@ export default function DashboardPage() {
                       <span>Categoría</span>
                       <select
                         className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
-                        value={selectedIngresosCategory}
+                        value={safeSelectedIngresosCategory}
                         onChange={(event) =>
                           setSelectedIngresosCategory(event.target.value)
                         }
@@ -1455,7 +1432,7 @@ export default function DashboardPage() {
                       <span>Categoría</span>
                       <select
                         className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
-                        value={selectedGastosCategory}
+                        value={safeSelectedGastosCategory}
                         onChange={(event) =>
                           setSelectedGastosCategory(event.target.value)
                         }
@@ -1738,9 +1715,9 @@ export default function DashboardPage() {
                                     ? "cursor-pointer hover:opacity-80"
                                     : "cursor-default"
                                 } ${
-                                  selectedSegment?.kind === "ingreso" &&
-                                  selectedSegment.fijo &&
-                                  selectedSegment.category === row.category
+                                  activeSelectedSegment?.kind === "ingreso" &&
+                                  activeSelectedSegment.fijo &&
+                                  activeSelectedSegment.category === row.category
                                     ? "ring-2 ring-emerald-300"
                                     : ""
                                 }`}
@@ -1770,9 +1747,9 @@ export default function DashboardPage() {
                                     ? "cursor-pointer hover:opacity-80"
                                     : "cursor-default"
                                 } ${
-                                  selectedSegment?.kind === "ingreso" &&
-                                  !selectedSegment.fijo &&
-                                  selectedSegment.category === row.category
+                                  activeSelectedSegment?.kind === "ingreso" &&
+                                  !activeSelectedSegment.fijo &&
+                                  activeSelectedSegment.category === row.category
                                     ? "ring-2 ring-emerald-200"
                                     : ""
                                 }`}
@@ -1827,9 +1804,9 @@ export default function DashboardPage() {
                                     ? "cursor-pointer hover:opacity-80"
                                     : "cursor-default"
                                 } ${
-                                  selectedSegment?.kind === "gasto" &&
-                                  selectedSegment.fijo &&
-                                  selectedSegment.category === row.category
+                                  activeSelectedSegment?.kind === "gasto" &&
+                                  activeSelectedSegment.fijo &&
+                                  activeSelectedSegment.category === row.category
                                     ? "ring-2 ring-rose-300"
                                     : ""
                                 }`}
@@ -1859,9 +1836,9 @@ export default function DashboardPage() {
                                     ? "cursor-pointer hover:opacity-80"
                                     : "cursor-default"
                                 } ${
-                                  selectedSegment?.kind === "gasto" &&
-                                  !selectedSegment.fijo &&
-                                  selectedSegment.category === row.category
+                                  activeSelectedSegment?.kind === "gasto" &&
+                                  !activeSelectedSegment.fijo &&
+                                  activeSelectedSegment.category === row.category
                                     ? "ring-2 ring-rose-200"
                                     : ""
                                 }`}
@@ -1912,15 +1889,17 @@ export default function DashboardPage() {
                     className="mt-2 text-xl font-semibold text-[var(--foreground)]"
                     style={{ fontFamily: "var(--font-fraunces)" }}
                   >
-                    {selectedSegment ? selectedSegmentLabel : "Selecciona una barra"}
+                    {activeSelectedSegment
+                      ? selectedSegmentLabel
+                      : "Selecciona una barra"}
                   </h3>
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    {selectedSegment
+                    {activeSelectedSegment
                       ? "Importes por detalle agrupados por mes."
                       : "Haz clic en una barra para ver el desglose mensual."}
                   </p>
                 </div>
-                {selectedSegment && (
+                {activeSelectedSegment && (
                   <button
                     onClick={() => setSelectedSegment(null)}
                     className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
@@ -1930,7 +1909,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {selectedSegment && (
+              {activeSelectedSegment && (
                 <div className="mt-6 max-w-full overflow-x-auto pb-2">
                   {detailGroups.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
@@ -1955,7 +1934,7 @@ export default function DashboardPage() {
                                 <div className="flex h-36 w-8 flex-col-reverse overflow-hidden rounded-full bg-black/5 shadow-inner dark:bg-white/10">
                                   <div
                                     className={`${
-                                      selectedSegment.kind === "ingreso"
+                                      activeSelectedSegment.kind === "ingreso"
                                         ? "bg-emerald-500"
                                         : "bg-rose-500"
                                     }`}
