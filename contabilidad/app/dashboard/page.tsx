@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [libros, setLibros] = useState<Libro[]>([]);
   const [librosLoading, setLibrosLoading] = useState(false);
@@ -1042,11 +1043,8 @@ export default function DashboardPage() {
               className="text-2xl font-semibold text-[var(--foreground)]"
               style={{ fontFamily: "var(--font-fraunces)" }}
             >
-              Accede a tu libro
+              Accede a tu cuenta
             </h2>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              Inicia sesión para ver los libros autorizados y sus movimientos.
-            </p>
 
             <form className="mt-6 space-y-4" onSubmit={handleSignIn}>
               <label className="block text-sm font-medium text-[var(--foreground)]">
@@ -1062,14 +1060,47 @@ export default function DashboardPage() {
               </label>
               <label className="block text-sm font-medium text-[var(--foreground)]">
                 Contraseña
-                <input
-                  className="mt-2 w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-transparent focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
+                <div className="relative mt-2">
+                  <input
+                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 pr-12 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-transparent focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-[var(--muted)] transition hover:text-[var(--foreground)]"
+                    aria-label={
+                      showPassword ? "Ocultar contraseña" : "Mostrar contraseña"
+                    }
+                  >
+                    <svg
+                      className="h-5 w-5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      {showPassword ? (
+                        <>
+                          <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
+                          <circle cx="12" cy="12" r="3.5" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M3 12s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6Z" />
+                          <path d="M4 4l16 16" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                </div>
               </label>
               {authError && (
                 <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-700 dark:text-red-300">
@@ -1078,7 +1109,7 @@ export default function DashboardPage() {
               )}
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:translate-y-[-1px] hover:bg-[var(--accent-strong)]"
+                className="w-full cursor-pointer rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:translate-y-[-1px] hover:bg-[var(--accent-strong)]"
                 disabled={signInLoading}
               >
                 {signInLoading ? "Entrando..." : "Entrar"}
