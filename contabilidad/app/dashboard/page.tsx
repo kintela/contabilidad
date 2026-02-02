@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
 
@@ -19,6 +19,7 @@ type Movimiento = {
   fijo?: boolean | null;
   categoria_id?: string | null;
   categoria_nombre?: string | null;
+  categoria_kind?: string | null;
 };
 
 type SortKey = "fecha" | "categoria" | "detalle" | "fijo" | "importe";
@@ -32,6 +33,87 @@ const normalizeText = (value: string) =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeKindLabel = (value?: string | null) => {
+  const tipo = (value ?? "").toLowerCase().trim();
+  if (!tipo) return null;
+  if (
+    tipo.includes("ingres") ||
+    tipo.includes("income") ||
+    tipo.includes("entrada") ||
+    tipo.includes("abono")
+  ) {
+    return "ingreso" as const;
+  }
+  if (
+    tipo.includes("gast") ||
+    tipo.includes("expense") ||
+    tipo.includes("salida") ||
+    tipo.includes("cargo")
+  ) {
+    return "gasto" as const;
+  }
+  if (tipo === "i") return "ingreso" as const;
+  if (tipo === "g") return "gasto" as const;
+  return null;
+};
+
+const resolveCategoryKind = (categoria: Record<string, unknown>) => {
+  const tipo = typeof categoria.tipo === "string" ? categoria.tipo : null;
+  const kindFromTipo = normalizeKindLabel(tipo);
+  if (kindFromTipo) return kindFromTipo;
+  for (const [key, value] of Object.entries(categoria)) {
+    if (typeof value !== "string") continue;
+    const keyLower = key.toLowerCase();
+    if (
+      keyLower.includes("tipo") ||
+      keyLower.includes("kind") ||
+      keyLower.includes("mov")
+    ) {
+      const kind = normalizeKindLabel(value);
+      if (kind) return kind;
+    }
+  }
+  const esGasto =
+    typeof categoria.es_gasto === "boolean"
+      ? categoria.es_gasto
+      : typeof categoria.esGasto === "boolean"
+        ? categoria.esGasto
+        : typeof categoria.gasto === "boolean"
+          ? categoria.gasto
+          : null;
+  if (typeof esGasto === "boolean") return esGasto ? "gasto" : "ingreso";
+  const esIngreso =
+    typeof categoria.es_ingreso === "boolean"
+      ? categoria.es_ingreso
+      : typeof categoria.esIngreso === "boolean"
+        ? categoria.esIngreso
+        : typeof categoria.ingreso === "boolean"
+          ? categoria.ingreso
+          : null;
+  if (typeof esIngreso === "boolean") return esIngreso ? "ingreso" : "gasto";
+  for (const [key, value] of Object.entries(categoria)) {
+    if (typeof value !== "boolean") continue;
+    const keyLower = key.toLowerCase();
+    if (keyLower.includes("gasto")) return value ? "gasto" : "ingreso";
+    if (keyLower.includes("ingreso")) return value ? "ingreso" : "gasto";
+  }
+  return null;
+};
+
+const resolveKind = (mov: {
+  tipo?: string | null;
+  importe?: number | null;
+  categoria_kind?: string | null;
+}) => {
+  const categoryKind = normalizeKindLabel(mov.categoria_kind);
+  if (categoryKind) return categoryKind;
+  const amount = Number(mov.importe ?? 0);
+  if (Number.isFinite(amount) && amount < 0) return "gasto";
+  const tipoKind = normalizeKindLabel(mov.tipo);
+  if (tipoKind) return tipoKind;
+  return amount < 0 ? "gasto" : "ingreso";
+};
 
 const SortArrow = ({
   active,
@@ -98,6 +180,9 @@ export default function DashboardPage() {
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [movimientosLoading, setMovimientosLoading] = useState(false);
   const [movimientosError, setMovimientosError] = useState<string | null>(null);
+  const [yearlyMovimientos, setYearlyMovimientos] = useState<Movimiento[]>([]);
+  const [yearlyLoading, setYearlyLoading] = useState(false);
+  const [yearlyError, setYearlyError] = useState<string | null>(null);
 
   const [showIngresosFijos, setShowIngresosFijos] = useState(true);
   const [showIngresosVariables, setShowIngresosVariables] = useState(true);
@@ -105,6 +190,8 @@ export default function DashboardPage() {
   const [showGastosVariables, setShowGastosVariables] = useState(true);
   const [showChartFijos, setShowChartFijos] = useState(true);
   const [showChartVariables, setShowChartVariables] = useState(true);
+  const [showYearlyIngresos, setShowYearlyIngresos] = useState(true);
+  const [showYearlyGastos, setShowYearlyGastos] = useState(true);
   const [searchIngresos, setSearchIngresos] = useState("");
   const [searchGastos, setSearchGastos] = useState("");
   const [groupIngresosByCategory, setGroupIngresosByCategory] = useState(true);
@@ -159,6 +246,8 @@ export default function DashboardPage() {
         setSelectedLibroId(null);
         setAvailableYears([]);
         setMovimientos([]);
+        setYearlyMovimientos([]);
+        setYearlyError(null);
       }
       setSessionLoading(false);
     });
@@ -174,6 +263,8 @@ export default function DashboardPage() {
           setSelectedLibroId(null);
           setAvailableYears([]);
           setMovimientos([]);
+          setYearlyMovimientos([]);
+          setYearlyError(null);
         }
       }
     );
@@ -342,19 +433,25 @@ export default function DashboardPage() {
         )
       ) as string[];
 
-      const categoriaMap = new Map<string, string | null>();
+      const categoriaMap = new Map<
+        string,
+        { nombre: string | null; kind: "ingreso" | "gasto" | null }
+      >();
 
       if (categoriaIds.length > 0) {
         const { data: categoriasData, error: categoriasError } = await supabase
           .from("categorias")
-          .select("id, nombre")
+          .select("*")
           .in("id", categoriaIds);
 
         if (categoriasError) {
           setMovimientosError(categoriasError.message);
         } else {
           categoriasData?.forEach((categoria) => {
-            categoriaMap.set(categoria.id, categoria.nombre);
+            categoriaMap.set(categoria.id, {
+              nombre: categoria.nombre ?? null,
+              kind: resolveCategoryKind(categoria as Record<string, unknown>),
+            });
           });
         }
       }
@@ -362,7 +459,10 @@ export default function DashboardPage() {
       const enriched = (movimientosData ?? []).map((mov) => ({
         ...mov,
         categoria_nombre: mov.categoria_id
-          ? categoriaMap.get(mov.categoria_id) ?? null
+          ? categoriaMap.get(mov.categoria_id)?.nombre ?? null
+          : null,
+        categoria_kind: mov.categoria_id
+          ? categoriaMap.get(mov.categoria_id)?.kind ?? null
           : null,
       }));
 
@@ -372,6 +472,82 @@ export default function DashboardPage() {
 
     loadMovimientos();
   }, [selectedLibroId, selectedYear]);
+
+  useEffect(() => {
+    if (!selectedLibroId) return;
+
+    const loadYearlyMovimientos = async () => {
+      setYearlyLoading(true);
+      setYearlyError(null);
+
+      const pageSize = 500;
+      let from = 0;
+      const allRows: Movimiento[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("movimientos")
+          .select("id, fecha, tipo, importe, fijo, categoria_id, detalle")
+          .eq("libro_id", selectedLibroId)
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          setYearlyError(error.message);
+          setYearlyMovimientos([]);
+          setYearlyLoading(false);
+          return;
+        }
+
+        if (!data || data.length === 0) break;
+        allRows.push(...data);
+
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const categoriaIds = Array.from(
+        new Set(allRows.map((mov) => mov.categoria_id).filter(Boolean))
+      ) as string[];
+
+      const categoriaMap = new Map<
+        string,
+        { nombre: string | null; kind: "ingreso" | "gasto" | null }
+      >();
+
+      if (categoriaIds.length > 0) {
+        const { data: categoriasData, error: categoriasError } = await supabase
+          .from("categorias")
+          .select("*")
+          .in("id", categoriaIds);
+
+        if (categoriasError) {
+          setYearlyError(categoriasError.message);
+        } else {
+          categoriasData?.forEach((categoria) => {
+            categoriaMap.set(categoria.id, {
+              nombre: categoria.nombre ?? null,
+              kind: resolveCategoryKind(categoria as Record<string, unknown>),
+            });
+          });
+        }
+      }
+
+      const enriched = allRows.map((mov) => ({
+        ...mov,
+        categoria_nombre: mov.categoria_id
+          ? categoriaMap.get(mov.categoria_id)?.nombre ?? null
+          : null,
+        categoria_kind: mov.categoria_id
+          ? categoriaMap.get(mov.categoria_id)?.kind ?? null
+          : null,
+      }));
+
+      setYearlyMovimientos(enriched);
+      setYearlyLoading(false);
+    };
+
+    loadYearlyMovimientos();
+  }, [selectedLibroId]);
 
   const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
@@ -388,21 +564,13 @@ export default function DashboardPage() {
     let gastos = 0;
 
     movimientos.forEach((mov) => {
-      const amount = Number(mov.importe ?? 0);
-      const tipo = (mov.tipo ?? "").toLowerCase();
-
-      if (tipo === "ingreso" || tipo === "income") {
-        ingresos += Math.abs(amount);
-        return;
-      }
-      if (tipo === "gasto" || tipo === "expense") {
-        gastos += Math.abs(amount);
-        return;
-      }
-      if (amount < 0) {
-        gastos += Math.abs(amount);
+      const amount = Math.abs(Number(mov.importe ?? 0));
+      if (!Number.isFinite(amount) || amount === 0) return;
+      const kind = resolveKind(mov);
+      if (kind === "ingreso") {
+        ingresos += amount;
       } else {
-        ingresos += Math.abs(amount);
+        gastos += amount;
       }
     });
 
@@ -416,13 +584,7 @@ export default function DashboardPage() {
   const movimientoRows = useMemo(() => {
     const withKind = movimientos.map((mov) => {
       const amount = Number(mov.importe ?? 0);
-      const tipo = (mov.tipo ?? "").toLowerCase();
-      const isIngreso =
-        tipo === "ingreso" || tipo === "income"
-          ? true
-          : tipo === "gasto" || tipo === "expense"
-            ? false
-            : amount >= 0;
+      const kind = resolveKind(mov);
 
       const categoryName = mov.categoria_nombre ?? "Sin categoría";
 
@@ -433,7 +595,7 @@ export default function DashboardPage() {
 
       return {
         ...mov,
-        kind: (isIngreso ? "ingreso" : "gasto") as "ingreso" | "gasto",
+        kind,
         sortValue: Math.abs(amount),
         categoryName,
         detailText,
@@ -804,6 +966,174 @@ export default function DashboardPage() {
     sortIngresos
   );
   const sortedGastosGrouped = sortGrouped(searchedGastosGrouped, sortGastos);
+
+  const yearlyEvolution = useMemo(() => {
+    if (yearlyMovimientos.length === 0) {
+      return {
+        years: [] as number[],
+        ingresos: [] as { category: string; totals: Record<number, number>; total: number }[],
+        gastos: [] as { category: string; totals: Record<number, number>; total: number }[],
+        maxIngresos: 1,
+        maxGastos: 1,
+      };
+    }
+
+    const yearsSet = new Set<number>();
+    type YearBucket = { label: string; years: Map<number, number> };
+    const ingresoMap = new Map<string, YearBucket>();
+    const gastoMap = new Map<string, YearBucket>();
+
+    yearlyMovimientos.forEach((mov) => {
+      const amountRaw = Number(mov.importe ?? 0);
+      const amount = Math.abs(amountRaw);
+      if (!Number.isFinite(amount) || amount === 0) return;
+
+      const kind = resolveKind(mov);
+
+      const year = typeof mov.fecha === "string"
+        ? Number(mov.fecha.slice(0, 4)) || new Date(mov.fecha).getFullYear()
+        : new Date(mov.fecha).getFullYear();
+      if (!Number.isFinite(year)) return;
+
+      yearsSet.add(year);
+
+      const categoryLabel = mov.categoria_nombre ?? "Sin categoría";
+      const categoryKey = mov.categoria_id ?? categoryLabel;
+      const targetMap = kind === "ingreso" ? ingresoMap : gastoMap;
+      const bucket =
+        targetMap.get(categoryKey) ??
+        ({ label: categoryLabel, years: new Map<number, number>() } as YearBucket);
+      bucket.years.set(year, (bucket.years.get(year) ?? 0) + amount);
+      targetMap.set(categoryKey, bucket);
+    });
+
+    const years = Array.from(yearsSet).sort((a, b) => a - b);
+
+    const buildRows = (map: Map<string, YearBucket>) => {
+      return Array.from(map.values())
+        .map((bucket) => {
+          const totals: Record<number, number> = {};
+          let total = 0;
+          years.forEach((year) => {
+            const value = bucket.years.get(year) ?? 0;
+            totals[year] = value;
+            total += value;
+          });
+          return { category: bucket.label, totals, total };
+        })
+        .sort((a, b) => b.total - a.total);
+    };
+
+    const ingresos = buildRows(ingresoMap);
+    const gastos = buildRows(gastoMap);
+
+    const maxIngresos =
+      ingresos.length === 0
+        ? 1
+        : Math.max(
+            1,
+            ...ingresos.flatMap((row) =>
+              years.map((year) => row.totals[year] ?? 0)
+            )
+          );
+    const maxGastos =
+      gastos.length === 0
+        ? 1
+        : Math.max(
+            1,
+            ...gastos.flatMap((row) =>
+              years.map((year) => row.totals[year] ?? 0)
+            )
+          );
+
+    return { years, ingresos, gastos, maxIngresos, maxGastos };
+  }, [yearlyMovimientos]);
+
+  const yearlyCategoryWidth = 84;
+  const yearlyRowHeight = 28;
+
+  const yearlyDisplay = useMemo(() => {
+    const years = yearlyEvolution.years;
+    if (years.length === 0 || (!showYearlyIngresos && !showYearlyGastos)) {
+      return {
+        years,
+        categories: [] as {
+          category: string;
+          ingresos: Record<number, number>;
+          gastos: Record<number, number>;
+          total: number;
+        }[],
+        maxValue: 1,
+      };
+    }
+
+    const map = new Map<
+      string,
+      {
+        category: string;
+        ingresos: Record<number, number>;
+        gastos: Record<number, number>;
+        total: number;
+      }
+    >();
+
+    const ensureCategory = (category: string) => {
+      const existing = map.get(category);
+      if (existing) return existing;
+      const next = {
+        category,
+        ingresos: {} as Record<number, number>,
+        gastos: {} as Record<number, number>,
+        total: 0,
+      };
+      map.set(category, next);
+      return next;
+    };
+
+    if (showYearlyIngresos) {
+      yearlyEvolution.ingresos.forEach((row) => {
+        const entry = ensureCategory(row.category);
+        entry.ingresos = row.totals;
+        entry.total += row.total;
+      });
+    }
+
+    if (showYearlyGastos) {
+      yearlyEvolution.gastos.forEach((row) => {
+        const entry = ensureCategory(row.category);
+        entry.gastos = row.totals;
+        entry.total += row.total;
+      });
+    }
+
+    const categories = Array.from(map.values()).sort(
+      (a, b) => b.total - a.total
+    );
+
+    let maxValue = 1;
+    categories.forEach((category) => {
+      years.forEach((year) => {
+        if (showYearlyIngresos) {
+          maxValue = Math.max(maxValue, category.ingresos[year] ?? 0);
+        }
+        if (showYearlyGastos) {
+          maxValue = Math.max(maxValue, category.gastos[year] ?? 0);
+        }
+      });
+    });
+
+    return { years, categories, maxValue };
+  }, [yearlyEvolution, showYearlyIngresos, showYearlyGastos]);
+
+  const yearlyDotSize = (value: number) => {
+    if (value <= 0) return 0;
+    const min = 4;
+    const max = 12;
+    if (yearlyDisplay.maxValue <= 0) return min;
+    return Math.round(
+      min + (value / yearlyDisplay.maxValue) * (max - min)
+    );
+  };
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -2067,6 +2397,182 @@ export default function DashboardPage() {
                           </span>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    Evolución anual
+                  </p>
+                  <h3
+                    className="mt-2 text-xl font-semibold text-[var(--foreground)]"
+                    style={{ fontFamily: "var(--font-fraunces)" }}
+                  >
+                    Ingresos y gastos por categoría
+                  </h3>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    Evolucion por año agrupado por categorias
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--accent)]"
+                      checked={showYearlyIngresos}
+                      onChange={(event) =>
+                        setShowYearlyIngresos(event.target.checked)
+                      }
+                    />
+                    Ingresos
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--accent)]"
+                      checked={showYearlyGastos}
+                      onChange={(event) =>
+                        setShowYearlyGastos(event.target.checked)
+                      }
+                    />
+                    Gastos
+                  </label>
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                      Ingresos
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-rose-500" />
+                      Gastos
+                    </span>
+                  </div>
+                  {yearlyLoading && (
+                    <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--muted)] shadow-sm dark:border-white/10 dark:bg-black/60">
+                      Actualizando...
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {yearlyError && (
+                <p className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                  {yearlyError}
+                </p>
+              )}
+
+              {!yearlyLoading && yearlyEvolution.years.length === 0 && (
+                <div className="mt-4 rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                  No hay datos suficientes para mostrar la evolución anual.
+                </div>
+              )}
+
+              {yearlyEvolution.years.length > 0 && (
+                <div className="mt-6">
+                  {!showYearlyIngresos && !showYearlyGastos ? (
+                    <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                      Activa ingresos o gastos para ver la evolución anual.
+                    </div>
+                  ) : yearlyDisplay.categories.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                      No hay datos suficientes para mostrar la evolución anual.
+                    </div>
+                  ) : (
+                    <div
+                      className="mt-4 max-w-full overflow-x-auto pb-2"
+                      style={{ scrollbarGutter: "stable" }}
+                    >
+                      <div className="min-w-max">
+                        <div className="flex flex-col gap-2">
+                          {[...yearlyDisplay.years].reverse().map((year) => (
+                            <div key={year} className="flex items-end gap-4">
+                              <div
+                                className="flex items-end justify-end text-[11px] text-[var(--muted)]"
+                                style={{ width: "2.5rem", height: yearlyRowHeight }}
+                              >
+                                {year}
+                              </div>
+                              <div className="flex items-end gap-4">
+                                {yearlyDisplay.categories.map((category) => {
+                                  const ingresoValue =
+                                    category.ingresos[year] ?? 0;
+                                  const gastoValue = category.gastos[year] ?? 0;
+                                  const showIngresosDot =
+                                    showYearlyIngresos && ingresoValue > 0;
+                                  const showGastosDot =
+                                    showYearlyGastos && gastoValue > 0;
+                                  return (
+                                    <div
+                                      key={`${category.category}-${year}`}
+                                      className="relative"
+                                      style={{
+                                        width: `${yearlyCategoryWidth}px`,
+                                        height: `${yearlyRowHeight}px`,
+                                      }}
+                                    >
+                                      <div className="absolute left-0 right-0 bottom-0 h-px bg-black/5 dark:bg-white/10" />
+                                      {(showIngresosDot || showGastosDot) && (
+                                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2">
+                                          <div className="flex items-end gap-1">
+                                            {showIngresosDot && (
+                                              <span
+                                                className="rounded-full bg-emerald-500"
+                                                style={{
+                                                  width: `${yearlyDotSize(
+                                                    ingresoValue
+                                                  )}px`,
+                                                  height: `${yearlyDotSize(
+                                                    ingresoValue
+                                                  )}px`,
+                                                }}
+                                                title={`${category.category} · ${year} · Ingresos: ${formatCurrency(
+                                                  ingresoValue
+                                                )}`}
+                                              />
+                                            )}
+                                            {showGastosDot && (
+                                              <span
+                                                className="rounded-full bg-rose-500"
+                                                style={{
+                                                  width: `${yearlyDotSize(
+                                                    gastoValue
+                                                  )}px`,
+                                                  height: `${yearlyDotSize(
+                                                    gastoValue
+                                                  )}px`,
+                                                }}
+                                                title={`${category.category} · ${year} · Gastos: ${formatCurrency(
+                                                  gastoValue
+                                                )}`}
+                                              />
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 flex items-start gap-4 pl-14">
+                          {yearlyDisplay.categories.map((category) => (
+                            <span
+                              key={`cat-${category.category}`}
+                              className="text-center text-[11px] leading-snug text-[var(--muted)]"
+                              style={{ width: `${yearlyCategoryWidth}px` }}
+                            >
+                              {category.category}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
