@@ -53,6 +53,32 @@ const SortArrow = ({
   </svg>
 );
 
+const GroupToggle = ({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    title="agrupar"
+    onClick={onClick}
+    className={`flex h-4 w-4 items-center justify-center rounded-sm border border-transparent transition ${
+      active
+        ? "text-[var(--accent)]"
+        : "text-black/30 hover:text-black/60 dark:text-white/30 dark:hover:text-white/60"
+    }`}
+  >
+    <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden="true">
+      <rect x="1" y="1" width="4" height="4" fill="currentColor" />
+      <rect x="7" y="1" width="4" height="4" fill="currentColor" />
+      <rect x="1" y="7" width="4" height="4" fill="currentColor" />
+      <rect x="7" y="7" width="4" height="4" fill="currentColor" />
+    </svg>
+  </button>
+);
+
 export default function DashboardPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -80,8 +106,10 @@ export default function DashboardPage() {
   const [showChartVariables, setShowChartVariables] = useState(true);
   const [searchIngresos, setSearchIngresos] = useState("");
   const [searchGastos, setSearchGastos] = useState("");
-  const [groupIngresos, setGroupIngresos] = useState(true);
-  const [groupGastos, setGroupGastos] = useState(true);
+  const [groupIngresosByCategory, setGroupIngresosByCategory] = useState(true);
+  const [groupIngresosByDetail, setGroupIngresosByDetail] = useState(true);
+  const [groupGastosByCategory, setGroupGastosByCategory] = useState(true);
+  const [groupGastosByDetail, setGroupGastosByDetail] = useState(true);
   const [sortIngresos, setSortIngresos] = useState<SortState>({
     key: "importe",
     direction: "desc",
@@ -475,6 +503,10 @@ export default function DashboardPage() {
     );
   }, [filteredGastos, safeSelectedGastosCategory]);
 
+  const groupIngresosActive =
+    groupIngresosByCategory || groupIngresosByDetail;
+  const groupGastosActive = groupGastosByCategory || groupGastosByDetail;
+
   const normalizeQuery = (value: string) =>
     normalizeText(value).replace(/\s+/g, " ").trim();
 
@@ -505,7 +537,15 @@ export default function DashboardPage() {
     latestDate: number;
   };
 
-  const buildGroupedRows = (rows: typeof displayedIngresos): GroupedRow[] => {
+  type GroupingOptions = {
+    byCategory: boolean;
+    byDetail: boolean;
+  };
+
+  const buildGroupedRows = (
+    rows: typeof displayedIngresos,
+    options: GroupingOptions
+  ): GroupedRow[] => {
     const grouped = new Map<
       string,
       {
@@ -516,6 +556,8 @@ export default function DashboardPage() {
         hasFijo: boolean;
         hasVariable: boolean;
         latestDate: number;
+        categories: Set<string>;
+        details: Set<string>;
       }
     >();
 
@@ -525,7 +567,9 @@ export default function DashboardPage() {
       const movementDate = Number.isFinite(Date.parse(mov.fecha))
         ? Date.parse(mov.fecha)
         : 0;
-      const key = `${categoryName}||${detailText}`;
+      const key = `${options.byCategory ? categoryName : "todas"}||${
+        options.byDetail ? detailText : "todas"
+      }`;
       const existing = grouped.get(key) ?? {
         key,
         categoryName,
@@ -534,6 +578,8 @@ export default function DashboardPage() {
         hasFijo: false,
         hasVariable: false,
         latestDate: 0,
+        categories: new Set<string>(),
+        details: new Set<string>(),
       };
 
       const amount = Math.abs(Number(mov.importe ?? 0));
@@ -547,6 +593,8 @@ export default function DashboardPage() {
       if (movementDate > existing.latestDate) {
         existing.latestDate = movementDate;
       }
+      existing.categories.add(categoryName);
+      existing.details.add(detailText);
 
       grouped.set(key, existing);
     });
@@ -555,10 +603,20 @@ export default function DashboardPage() {
       .map((row) => {
         const fijoLabel: GroupedRow["fijoLabel"] =
           row.hasFijo && row.hasVariable ? "Mixto" : row.hasFijo ? "Sí" : "No";
+        const categoryLabel = options.byCategory
+          ? row.categoryName
+          : row.categories.size === 1
+            ? Array.from(row.categories)[0]
+            : "Varias";
+        const detailLabel = options.byDetail
+          ? row.detailText
+          : row.details.size === 1
+            ? Array.from(row.details)[0]
+            : "Varias";
         return {
           key: row.key,
-          categoryName: row.categoryName,
-          detailText: row.detailText,
+          categoryName: categoryLabel,
+          detailText: detailLabel,
           total: row.total,
           fijoLabel,
           latestDate: row.latestDate,
@@ -581,8 +639,18 @@ export default function DashboardPage() {
     });
   };
 
-  const groupedIngresos = buildGroupedRows(displayedIngresos);
-  const groupedGastos = buildGroupedRows(displayedGastos);
+  const groupedIngresos = groupIngresosActive
+    ? buildGroupedRows(displayedIngresos, {
+        byCategory: groupIngresosByCategory,
+        byDetail: groupIngresosByDetail,
+      })
+    : [];
+  const groupedGastos = groupGastosActive
+    ? buildGroupedRows(displayedGastos, {
+        byCategory: groupGastosByCategory,
+        byDetail: groupGastosByDetail,
+      })
+    : [];
 
   const ingresosQuery = normalizeQuery(searchIngresos);
   const gastosQuery = normalizeQuery(searchGastos);
@@ -599,13 +667,13 @@ export default function DashboardPage() {
   );
   const searchedGastosGrouped = filterGroupedRows(groupedGastos, gastosQuery);
 
-  const filteredIngresosTotal = groupIngresos
+  const filteredIngresosTotal = groupIngresosActive
     ? searchedIngresosGrouped.reduce((sum, row) => sum + row.total, 0)
     : searchedIngresosMovs.reduce((sum, mov) => {
         return sum + Math.abs(Number(mov.importe ?? 0));
       }, 0);
 
-  const filteredGastosTotal = groupGastos
+  const filteredGastosTotal = groupGastosActive
     ? searchedGastosGrouped.reduce((sum, row) => sum + row.total, 0)
     : searchedGastosMovs.reduce((sum, mov) => {
         return sum + Math.abs(Number(mov.importe ?? 0));
@@ -1140,17 +1208,6 @@ export default function DashboardPage() {
                         }
                         placeholder="Filtrar..."
                       />
-                      <label className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
-                        <input
-                          type="checkbox"
-                          className="accent-[var(--accent)]"
-                          checked={groupIngresos}
-                          onChange={(event) =>
-                            setGroupIngresos(event.target.checked)
-                          }
-                        />
-                        Agrupar
-                      </label>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
@@ -1228,50 +1285,68 @@ export default function DashboardPage() {
                           </button>
                         </th>
                         <th className="px-3 py-2 font-semibold">
-                          <button
-                            type="button"
-                            className="flex items-center gap-1"
-                            onClick={() =>
-                              toggleSort(
-                                setSortIngresos,
-                                sortIngresos,
-                                "categoria"
-                              )
-                            }
-                          >
-                            <span>Categoría</span>
-                            <SortArrow
-                              active={sortIngresos.key === "categoria"}
-                              direction={
-                                sortIngresos.key === "categoria"
-                                  ? sortIngresos.direction
-                                  : "desc"
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1"
+                              onClick={() =>
+                                toggleSort(
+                                  setSortIngresos,
+                                  sortIngresos,
+                                  "categoria"
+                                )
+                              }
+                            >
+                              <span>Categoría</span>
+                              <SortArrow
+                                active={sortIngresos.key === "categoria"}
+                                direction={
+                                  sortIngresos.key === "categoria"
+                                    ? sortIngresos.direction
+                                    : "desc"
+                                }
+                              />
+                            </button>
+                            <GroupToggle
+                              active={groupIngresosByCategory}
+                              onClick={() =>
+                                setGroupIngresosByCategory(
+                                  (prev) => !prev
+                                )
                               }
                             />
-                          </button>
+                          </div>
                         </th>
                         <th className="px-3 py-2 font-semibold">
-                          <button
-                            type="button"
-                            className="flex items-center gap-1"
-                            onClick={() =>
-                              toggleSort(
-                                setSortIngresos,
-                                sortIngresos,
-                                "detalle"
-                              )
-                            }
-                          >
-                            <span>Detalle</span>
-                            <SortArrow
-                              active={sortIngresos.key === "detalle"}
-                              direction={
-                                sortIngresos.key === "detalle"
-                                  ? sortIngresos.direction
-                                  : "desc"
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1"
+                              onClick={() =>
+                                toggleSort(
+                                  setSortIngresos,
+                                  sortIngresos,
+                                  "detalle"
+                                )
+                              }
+                            >
+                              <span>Detalle</span>
+                              <SortArrow
+                                active={sortIngresos.key === "detalle"}
+                                direction={
+                                  sortIngresos.key === "detalle"
+                                    ? sortIngresos.direction
+                                    : "desc"
+                                }
+                              />
+                            </button>
+                            <GroupToggle
+                              active={groupIngresosByDetail}
+                              onClick={() =>
+                                setGroupIngresosByDetail((prev) => !prev)
                               }
                             />
-                          </button>
+                          </div>
                         </th>
                         <th className="px-3 py-2 font-semibold">
                           <button
@@ -1318,7 +1393,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {(groupIngresos
+                      {(groupIngresosActive
                         ? sortedIngresosGrouped.length === 0
                         : sortedIngresosMovs.length === 0) && (
                         <tr>
@@ -1330,7 +1405,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {groupIngresos
+                      {groupIngresosActive
                         ? sortedIngresosGrouped.map((row) => (
                             <tr
                               key={row.key}
@@ -1384,17 +1459,6 @@ export default function DashboardPage() {
                         onChange={(event) => setSearchGastos(event.target.value)}
                         placeholder="Filtrar..."
                       />
-                      <label className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
-                        <input
-                          type="checkbox"
-                          className="accent-[var(--accent)]"
-                          checked={groupGastos}
-                          onChange={(event) =>
-                            setGroupGastos(event.target.checked)
-                          }
-                        />
-                        Agrupar
-                      </label>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
                       <label className="flex items-center gap-2">
@@ -1472,50 +1536,66 @@ export default function DashboardPage() {
                           </button>
                         </th>
                         <th className="px-3 py-2 font-semibold">
-                          <button
-                            type="button"
-                            className="flex items-center gap-1"
-                            onClick={() =>
-                              toggleSort(
-                                setSortGastos,
-                                sortGastos,
-                                "categoria"
-                              )
-                            }
-                          >
-                            <span>Categoría</span>
-                            <SortArrow
-                              active={sortGastos.key === "categoria"}
-                              direction={
-                                sortGastos.key === "categoria"
-                                  ? sortGastos.direction
-                                  : "desc"
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1"
+                              onClick={() =>
+                                toggleSort(
+                                  setSortGastos,
+                                  sortGastos,
+                                  "categoria"
+                                )
+                              }
+                            >
+                              <span>Categoría</span>
+                              <SortArrow
+                                active={sortGastos.key === "categoria"}
+                                direction={
+                                  sortGastos.key === "categoria"
+                                    ? sortGastos.direction
+                                    : "desc"
+                                }
+                              />
+                            </button>
+                            <GroupToggle
+                              active={groupGastosByCategory}
+                              onClick={() =>
+                                setGroupGastosByCategory((prev) => !prev)
                               }
                             />
-                          </button>
+                          </div>
                         </th>
                         <th className="px-3 py-2 font-semibold">
-                          <button
-                            type="button"
-                            className="flex items-center gap-1"
-                            onClick={() =>
-                              toggleSort(
-                                setSortGastos,
-                                sortGastos,
-                                "detalle"
-                              )
-                            }
-                          >
-                            <span>Detalle</span>
-                            <SortArrow
-                              active={sortGastos.key === "detalle"}
-                              direction={
-                                sortGastos.key === "detalle"
-                                  ? sortGastos.direction
-                                  : "desc"
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1"
+                              onClick={() =>
+                                toggleSort(
+                                  setSortGastos,
+                                  sortGastos,
+                                  "detalle"
+                                )
+                              }
+                            >
+                              <span>Detalle</span>
+                              <SortArrow
+                                active={sortGastos.key === "detalle"}
+                                direction={
+                                  sortGastos.key === "detalle"
+                                    ? sortGastos.direction
+                                    : "desc"
+                                }
+                              />
+                            </button>
+                            <GroupToggle
+                              active={groupGastosByDetail}
+                              onClick={() =>
+                                setGroupGastosByDetail((prev) => !prev)
                               }
                             />
-                          </button>
+                          </div>
                         </th>
                         <th className="px-3 py-2 font-semibold">
                           <button
@@ -1558,7 +1638,7 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="text-[var(--foreground)]">
-                      {(groupGastos
+                      {(groupGastosActive
                         ? sortedGastosGrouped.length === 0
                         : sortedGastosMovs.length === 0) && (
                         <tr>
@@ -1570,7 +1650,7 @@ export default function DashboardPage() {
                           </td>
                         </tr>
                       )}
-                      {groupGastos
+                      {groupGastosActive
                         ? sortedGastosGrouped.map((row) => (
                             <tr
                               key={row.key}
