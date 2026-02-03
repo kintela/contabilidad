@@ -193,6 +193,10 @@ export default function DashboardPage() {
   const [showYearlyGastos, setShowYearlyGastos] = useState(true);
   const [showYearlyFijos, setShowYearlyFijos] = useState(true);
   const [showYearlyVariables, setShowYearlyVariables] = useState(false);
+  const [selectedYearlyYear, setSelectedYearlyYear] = useState("todos");
+  const [selectedYearlyCategory, setSelectedYearlyCategory] =
+    useState("todas");
+  const [selectedYearlyDetail, setSelectedYearlyDetail] = useState("todos");
   const [searchIngresos, setSearchIngresos] = useState("");
   const [searchGastos, setSearchGastos] = useState("");
   const [groupIngresosByCategory, setGroupIngresosByCategory] = useState(true);
@@ -1009,6 +1013,50 @@ export default function DashboardPage() {
   const yearlyCategoryWidth = 84;
   const yearlyRowHeight = 48;
   const yearlyTotalColumnWidth = 96;
+  const yearlyYearOptions = yearlyEvolution.years
+    .slice()
+    .sort((a, b) => b - a);
+
+  const yearlyCategoryOptions = useMemo(() => {
+    const selectedYear =
+      selectedYearlyYear === "todos" ? null : Number(selectedYearlyYear);
+    const set = new Set<string>();
+    yearlyMovimientos.forEach((mov) => {
+      const year =
+        typeof mov.fecha === "string"
+          ? Number(mov.fecha.slice(0, 4)) || new Date(mov.fecha).getFullYear()
+          : new Date(mov.fecha).getFullYear();
+      if (!Number.isFinite(year)) return;
+      if (selectedYear !== null && year !== selectedYear) return;
+      const category = mov.categoria_nombre ?? "Sin categoría";
+      set.add(category);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
+  }, [yearlyMovimientos, selectedYearlyYear]);
+
+  const yearlyDetailOptions = useMemo(() => {
+    if (selectedYearlyCategory === "todas") return [];
+    const selectedYear =
+      selectedYearlyYear === "todos" ? null : Number(selectedYearlyYear);
+    const set = new Set<string>();
+    yearlyMovimientos.forEach((mov) => {
+      const year =
+        typeof mov.fecha === "string"
+          ? Number(mov.fecha.slice(0, 4)) || new Date(mov.fecha).getFullYear()
+          : new Date(mov.fecha).getFullYear();
+      if (!Number.isFinite(year)) return;
+      if (selectedYear !== null && year !== selectedYear) return;
+      const category = mov.categoria_nombre ?? "Sin categoría";
+      if (category !== selectedYearlyCategory) return;
+      const detail =
+        typeof mov.detalle === "string" && mov.detalle.trim().length > 0
+          ? mov.detalle.trim()
+          : "Sin detalle";
+      set.add(detail);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
+  }, [yearlyMovimientos, selectedYearlyYear, selectedYearlyCategory]);
+
 
   const yearlyDisplay = useMemo(() => {
     const yearsSet = new Set<number>();
@@ -1045,6 +1093,9 @@ export default function DashboardPage() {
       record[year] = (record[year] ?? 0) + amount;
     };
 
+    const selectedYear =
+      selectedYearlyYear === "todos" ? null : Number(selectedYearlyYear);
+
     yearlyMovimientos.forEach((mov) => {
       const amount = Math.abs(Number(mov.importe ?? 0));
       if (!Number.isFinite(amount) || amount === 0) return;
@@ -1066,9 +1117,26 @@ export default function DashboardPage() {
           ? Number(mov.fecha.slice(0, 4)) || new Date(mov.fecha).getFullYear()
           : new Date(mov.fecha).getFullYear();
       if (!Number.isFinite(year)) return;
+      if (selectedYear !== null && year !== selectedYear) return;
       yearsSet.add(year);
 
       const categoryLabel = mov.categoria_nombre ?? "Sin categoría";
+      if (
+        selectedYearlyCategory !== "todas" &&
+        categoryLabel !== selectedYearlyCategory
+      ) {
+        return;
+      }
+      const detailLabel =
+        typeof mov.detalle === "string" && mov.detalle.trim().length > 0
+          ? mov.detalle.trim()
+          : "Sin detalle";
+      if (
+        selectedYearlyDetail !== "todos" &&
+        detailLabel !== selectedYearlyDetail
+      ) {
+        return;
+      }
       const categoryKey = mov.categoria_id ?? categoryLabel;
       const entry = ensureCategory(categoryKey, categoryLabel);
 
@@ -1224,6 +1292,9 @@ export default function DashboardPage() {
     showYearlyGastos,
     showYearlyFijos,
     showYearlyVariables,
+    selectedYearlyYear,
+    selectedYearlyCategory,
+    selectedYearlyDetail,
   ]);
 
   const yearlyDotSize = (value: number) => {
@@ -1248,6 +1319,7 @@ export default function DashboardPage() {
       : showYearlyGastos && !showYearlyIngresos
         ? "text-rose-300"
         : "text-[var(--muted)]";
+
 
   const chartData = useMemo(() => {
     type ChartRow = {
@@ -2188,6 +2260,68 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span>Año</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyYear}
+                        onChange={(event) => {
+                          setSelectedYearlyYear(event.target.value);
+                          setSelectedYearlyCategory("todas");
+                          setSelectedYearlyDetail("todos");
+                        }}
+                        disabled={yearlyYearOptions.length === 0}
+                      >
+                        <option value="todos">Todos</option>
+                        {yearlyYearOptions.map((year) => (
+                          <option key={year} value={String(year)}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Categoría</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyCategory}
+                        onChange={(event) => {
+                          setSelectedYearlyCategory(event.target.value);
+                          setSelectedYearlyDetail("todos");
+                        }}
+                        disabled={yearlyCategoryOptions.length === 0}
+                      >
+                        <option value="todas">Todas</option>
+                        {yearlyCategoryOptions.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Detalle</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyDetail}
+                        onChange={(event) =>
+                          setSelectedYearlyDetail(event.target.value)
+                        }
+                        disabled={
+                          selectedYearlyCategory === "todas" ||
+                          yearlyDetailOptions.length === 0
+                        }
+                      >
+                        <option value="todos">Todos</option>
+                        {yearlyDetailOptions.map((detail) => (
+                          <option key={detail} value={detail}>
+                            {detail}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -2534,6 +2668,68 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span>Año</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyYear}
+                        onChange={(event) => {
+                          setSelectedYearlyYear(event.target.value);
+                          setSelectedYearlyCategory("todas");
+                          setSelectedYearlyDetail("todos");
+                        }}
+                        disabled={yearlyYearOptions.length === 0}
+                      >
+                        <option value="todos">Todos</option>
+                        {yearlyYearOptions.map((year) => (
+                          <option key={year} value={String(year)}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Categoría</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyCategory}
+                        onChange={(event) => {
+                          setSelectedYearlyCategory(event.target.value);
+                          setSelectedYearlyDetail("todos");
+                        }}
+                        disabled={yearlyCategoryOptions.length === 0}
+                      >
+                        <option value="todas">Todas</option>
+                        {yearlyCategoryOptions.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Detalle</span>
+                      <select
+                        className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                        value={selectedYearlyDetail}
+                        onChange={(event) =>
+                          setSelectedYearlyDetail(event.target.value)
+                        }
+                        disabled={
+                          selectedYearlyCategory === "todas" ||
+                          yearlyDetailOptions.length === 0
+                        }
+                      >
+                        <option value="todos">Todos</option>
+                        {yearlyDetailOptions.map((detail) => (
+                          <option key={detail} value={detail}>
+                            {detail}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
