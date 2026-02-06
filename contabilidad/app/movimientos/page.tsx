@@ -179,6 +179,11 @@ export default function MovimientosPage() {
   const [editingValue, setEditingValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Movimiento | null>(
+    null
+  );
 
   useEffect(() => {
     if (libroParam) {
@@ -709,6 +714,40 @@ export default function MovimientosPage() {
   const isEditing = (id: string, field: EditableField) =>
     editingCell?.id === id && editingCell.field === field;
 
+  const handleDeleteMovimiento = (mov: Movimiento) => {
+    if (deleteLoadingId) return;
+    setDeleteError(null);
+    setDeleteCandidate(mov);
+  };
+
+  const handleCloseDeleteModal = () => {
+    if (deleteLoadingId) return;
+    setDeleteCandidate(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteCandidate || deleteLoadingId) return;
+    setDeleteError(null);
+    setDeleteLoadingId(deleteCandidate.id);
+
+    const { error } = await supabase
+      .from("movimientos")
+      .delete()
+      .eq("id", deleteCandidate.id);
+
+    if (error) {
+      setDeleteError(error.message);
+      setDeleteLoadingId(null);
+      return;
+    }
+
+    setMovimientos((prev) =>
+      prev.filter((item) => item.id !== deleteCandidate.id)
+    );
+    setDeleteLoadingId(null);
+    setDeleteCandidate(null);
+  };
+
   const resetAddMovimientoForm = () => {
     setAddDay("");
     setAddCategoriaId("");
@@ -1053,7 +1092,7 @@ export default function MovimientosPage() {
               <button
                 type="submit"
                 disabled={addMovimientoLoading}
-                className="rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-lg shadow-emerald-500/20 transition hover:translate-y-[-1px] hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                className="cursor-pointer rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-lg shadow-emerald-500/20 transition hover:translate-y-[-1px] hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {addMovimientoLoading ? "Guardando..." : "Guardar movimiento"}
               </button>
@@ -1092,6 +1131,11 @@ export default function MovimientosPage() {
                 {editError}
               </span>
             )}
+            {deleteError && (
+              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
+                {deleteError}
+              </span>
+            )}
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -1104,13 +1148,14 @@ export default function MovimientosPage() {
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Fijo</th>
                   <th className="px-3 py-2 text-right">Importe</th>
+                  <th className="px-3 py-2 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5 text-[var(--foreground)] dark:divide-white/10">
                 {movimientos.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-3 py-6 text-center text-sm text-[var(--muted)]"
                     >
                       Sin movimientos en este libro.
@@ -1272,6 +1317,32 @@ export default function MovimientosPage() {
                             formatMovementAmount(mov)
                           )}
                         </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMovimiento(mov)}
+                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-transparent text-[var(--muted)] transition hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Eliminar movimiento"
+                            disabled={deleteLoadingId === mov.id}
+                          >
+                            <svg
+                              className="h-4 w-4"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4h8v2" />
+                              <path d="M6 6l1 14h10l1-14" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          </button>
+                        </td>
                       </tr>
                     );
                   })
@@ -1281,6 +1352,94 @@ export default function MovimientosPage() {
           </div>
         </section>
       </div>
+      {deleteCandidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={handleCloseDeleteModal}
+            aria-hidden="true"
+          />
+          <div
+            className="relative w-full max-w-md rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_40px_120px_rgba(15,23,42,0.25)] dark:border-white/10"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmar eliminación"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  className="text-2xl font-semibold text-[var(--foreground)]"
+                  style={{ fontFamily: "var(--font-fraunces)" }}
+                >
+                  Eliminar movimiento
+                </h2>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                  Esta acción no se puede deshacer
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseDeleteModal}
+                className="rounded-full border border-black/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
+                disabled={deleteLoadingId === deleteCandidate.id}
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-black/10 bg-black/5 px-4 py-3 text-sm text-[var(--foreground)] dark:border-white/10 dark:bg-white/5">
+              <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                Detalles
+              </div>
+              <div className="mt-2 space-y-1 text-sm">
+                <div>
+                  <span className="text-[var(--muted)]">Fecha:</span>{" "}
+                  {formatDate(deleteCandidate.fecha)}
+                </div>
+                <div>
+                  <span className="text-[var(--muted)]">Categoría:</span>{" "}
+                  {deleteCandidate.categoria_nombre ?? "Sin categoría"}
+                </div>
+                <div>
+                  <span className="text-[var(--muted)]">Detalle:</span>{" "}
+                  {deleteCandidate.detalle ?? "Sin detalle"}
+                </div>
+                <div>
+                  <span className="text-[var(--muted)]">Importe:</span>{" "}
+                  {formatMovementAmount(deleteCandidate)}
+                </div>
+              </div>
+            </div>
+
+            {deleteError && (
+              <p className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-700 dark:text-red-300">
+                {deleteError}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseDeleteModal}
+                className="cursor-pointer rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed dark:border-white/10"
+                disabled={deleteLoadingId === deleteCandidate.id}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleteLoadingId === deleteCandidate.id}
+                className="cursor-pointer rounded-full bg-rose-600 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-lg shadow-rose-500/20 transition hover:translate-y-[-1px] hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {deleteLoadingId === deleteCandidate.id
+                  ? "Eliminando..."
+                  : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
