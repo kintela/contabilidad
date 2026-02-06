@@ -134,6 +134,16 @@ const resolveKind = (mov: {
   return null;
 };
 
+const sortMovimientos = (rows: Movimiento[]) =>
+  [...rows].sort((a, b) => {
+    const dateDiff =
+      new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    const createdA = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+    const createdB = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+    return createdB - createdA;
+  });
+
 export default function MovimientosPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -184,12 +194,6 @@ export default function MovimientosPage() {
   const [deleteCandidate, setDeleteCandidate] = useState<Movimiento | null>(
     null
   );
-
-  useEffect(() => {
-    if (libroParam) {
-      setSelectedLibroId(libroParam);
-    }
-  }, [libroParam]);
 
   useEffect(() => {
     let isMounted = true;
@@ -456,13 +460,6 @@ export default function MovimientosPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [movimientos]);
 
-  useEffect(() => {
-    const selectedCategory = categorias.find((item) => item.id === addCategoriaId);
-    if (selectedCategory?.kind) {
-      setAddTipo(selectedCategory.kind);
-    }
-  }, [addCategoriaId, categorias]);
-
   const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
 
@@ -531,16 +528,6 @@ export default function MovimientosPage() {
     }
     return trimmed;
   };
-
-  const sortMovimientos = (rows: Movimiento[]) =>
-    [...rows].sort((a, b) => {
-      const dateDiff =
-        new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
-      if (dateDiff !== 0) return dateDiff;
-      const createdA = a.creado_en ? new Date(a.creado_en).getTime() : 0;
-      const createdB = b.creado_en ? new Date(b.creado_en).getTime() : 0;
-      return createdB - createdA;
-    });
 
   const cancelEdit = () => {
     setEditingCell(null);
@@ -880,7 +867,7 @@ export default function MovimientosPage() {
             </div>
             <Link
               href="/dashboard"
-              className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
+              className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] underline decoration-transparent transition hover:text-[var(--accent)] hover:decoration-[var(--accent)]"
             >
               Volver al dashboard
             </Link>
@@ -1001,7 +988,16 @@ export default function MovimientosPage() {
                 <select
                   className="mt-2 w-full rounded-2xl border border-black/10 bg-white px-4 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-black/60"
                   value={addCategoriaId}
-                  onChange={(event) => setAddCategoriaId(event.target.value)}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setAddCategoriaId(value);
+                    const selectedCategory = categorias.find(
+                      (item) => item.id === value
+                    );
+                    if (selectedCategory?.kind) {
+                      setAddTipo(selectedCategory.kind);
+                    }
+                  }}
                   disabled={categoriasLoading || categorias.length === 0}
                 >
                   <option value="">
