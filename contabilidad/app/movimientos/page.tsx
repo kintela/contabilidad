@@ -25,6 +25,14 @@ type Movimiento = {
   creado_en?: string | null;
 };
 
+type EditableField =
+  | "fecha"
+  | "categoria_id"
+  | "detalle"
+  | "tipo"
+  | "fijo"
+  | "importe";
+
 type Categoria = {
   id: string;
   nombre: string | null;
@@ -164,6 +172,13 @@ export default function MovimientosPage() {
   const [movimientosLoading, setMovimientosLoading] = useState(false);
   const [movimientosError, setMovimientosError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [editingCell, setEditingCell] = useState<{
+    id: string;
+    field: EditableField;
+  } | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     if (libroParam) {
@@ -413,7 +428,7 @@ export default function MovimientosPage() {
           : null,
       }));
 
-      setMovimientos(enriched);
+      setMovimientos(sortMovimientos(enriched));
       setMovimientosLoading(false);
     };
 
@@ -497,6 +512,203 @@ export default function MovimientosPage() {
     return Number.isFinite(amount) ? amount : null;
   };
 
+  const parseDateInput = (value: string) => {
+    const trimmed = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+    const [year, month, day] = trimmed.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      return null;
+    }
+    return trimmed;
+  };
+
+  const sortMovimientos = (rows: Movimiento[]) =>
+    [...rows].sort((a, b) => {
+      const dateDiff =
+        new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      const createdA = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+      const createdB = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+      return createdB - createdA;
+    });
+
+  const cancelEdit = () => {
+    setEditingCell(null);
+    setEditingValue("");
+    setEditError(null);
+  };
+
+  const startEdit = (mov: Movimiento, field: EditableField) => {
+    if (editSaving) return;
+    if (editingCell?.id === mov.id && editingCell.field === field) return;
+    setEditError(null);
+    setEditingCell({ id: mov.id, field });
+    switch (field) {
+      case "fecha":
+        setEditingValue(mov.fecha?.slice(0, 10) ?? "");
+        break;
+      case "categoria_id":
+        setEditingValue(mov.categoria_id ?? "");
+        break;
+      case "detalle":
+        setEditingValue(mov.detalle ?? "");
+        break;
+      case "tipo":
+        setEditingValue(mov.tipo ?? "");
+        break;
+      case "fijo":
+        setEditingValue(mov.fijo ? "si" : "no");
+        break;
+      case "importe":
+        setEditingValue(
+          Number.isFinite(Number(mov.importe ?? 0))
+            ? String(mov.importe ?? "")
+            : ""
+        );
+        break;
+      default:
+        setEditingValue("");
+    }
+  };
+
+  const commitEdit = async () => {
+    if (!editingCell) return;
+    if (editSaving) return;
+    const target = movimientos.find((mov) => mov.id === editingCell.id);
+    if (!target) {
+      cancelEdit();
+      return;
+    }
+
+    const updates: Partial<Movimiento> = {};
+    const payload: Record<string, unknown> = {};
+
+    switch (editingCell.field) {
+      case "fecha": {
+        const nextDate = parseDateInput(editingValue);
+        if (!nextDate) {
+          setEditError("La fecha no es válida.");
+          return;
+        }
+        payload.fecha = nextDate;
+        updates.fecha = nextDate;
+        break;
+      }
+      case "categoria_id": {
+        if (!editingValue) {
+          setEditError("Selecciona una categoría.");
+          return;
+        }
+        payload.categoria_id = editingValue;
+        updates.categoria_id = editingValue;
+        const categoriaLookup = categorias.find(
+          (categoria) => categoria.id === editingValue
+        );
+        updates.categoria_nombre = categoriaLookup?.nombre ?? null;
+        updates.categoria_kind = categoriaLookup?.kind ?? null;
+        break;
+      }
+      case "detalle": {
+        const nextDetail = editingValue.trim();
+        payload.detalle = nextDetail ? nextDetail : null;
+        updates.detalle = nextDetail ? nextDetail : null;
+        break;
+      }
+      case "tipo": {
+        if (editingValue !== "ingreso" && editingValue !== "gasto") {
+          setEditError("Selecciona un tipo válido.");
+          return;
+        }
+        payload.tipo = editingValue;
+        updates.tipo = editingValue as "ingreso" | "gasto";
+        break;
+      }
+      case "fijo": {
+        const nextFijo = editingValue === "si";
+        payload.fijo = nextFijo;
+        updates.fijo = nextFijo;
+        break;
+      }
+      case "importe": {
+        const importeValue = parseImporteValue(editingValue);
+        if (importeValue === null) {
+          setEditError("Introduce un importe válido.");
+          return;
+        }
+        if (importeValue < 0) {
+          setEditError("El importe debe ser mayor o igual a cero.");
+          return;
+        }
+        payload.importe = importeValue;
+        updates.importe = importeValue;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      cancelEdit();
+      return;
+    }
+
+    setEditSaving(true);
+
+    const { data, error } = await supabase
+      .from("movimientos")
+      .update(payload)
+      .eq("id", target.id)
+      .select(
+        "id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en"
+      )
+      .single();
+
+    if (error) {
+      setEditError(error.message);
+      setEditSaving(false);
+      return;
+    }
+
+    const categoriaLookup = categorias.find(
+      (categoria) => categoria.id === data.categoria_id
+    );
+    const enriched: Movimiento = {
+      ...data,
+      categoria_nombre: categoriaLookup?.nombre ?? null,
+      categoria_kind: categoriaLookup?.kind ?? null,
+    };
+
+    setMovimientos((prev) =>
+      sortMovimientos(
+        prev.map((mov) => (mov.id === target.id ? enriched : mov))
+      )
+    );
+
+    setEditSaving(false);
+    cancelEdit();
+  };
+
+  const handleEditKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitEdit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEdit();
+    }
+  };
+
+  const isEditing = (id: string, field: EditableField) =>
+    editingCell?.id === id && editingCell.field === field;
+
   const resetAddMovimientoForm = () => {
     setAddDay("");
     setAddCategoriaId("");
@@ -571,20 +783,7 @@ export default function MovimientosPage() {
       categoria_kind: categoriaLookup?.kind ?? null,
     };
 
-    setMovimientos((prev) => {
-      const next = [enriched, ...prev];
-      next.sort(
-        (a, b) => {
-          const dateDiff =
-            new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
-          if (dateDiff !== 0) return dateDiff;
-          const createdA = a.creado_en ? new Date(a.creado_en).getTime() : 0;
-          const createdB = b.creado_en ? new Date(b.creado_en).getTime() : 0;
-          return createdB - createdA;
-        }
-      );
-      return next;
-    });
+    setMovimientos((prev) => sortMovimientos([enriched, ...prev]));
 
     setAddMovimientoLoading(false);
     resetAddMovimientoForm();
@@ -888,6 +1087,11 @@ export default function MovimientosPage() {
                 {movimientosError}
               </span>
             )}
+            {editError && (
+              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
+                {editError}
+              </span>
+            )}
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -923,21 +1127,150 @@ export default function MovimientosPage() {
                           : "-";
                     return (
                       <tr key={mov.id} className="hover:bg-black/5">
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {formatDate(mov.fecha)}
+                        <td
+                          className="px-3 py-2 whitespace-nowrap cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "fecha")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "fecha") ? (
+                            <input
+                              type="date"
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={editSaving}
+                            />
+                          ) : (
+                            formatDate(mov.fecha)
+                          )}
                         </td>
-                        <td className="px-3 py-2">
-                          {mov.categoria_nombre ?? "Sin categoría"}
+                        <td
+                          className="px-3 py-2 cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "categoria_id")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "categoria_id") ? (
+                            <select
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={
+                                editSaving ||
+                                categoriasLoading ||
+                                categorias.length === 0
+                              }
+                            >
+                              <option value="">
+                                {categoriasLoading
+                                  ? "Cargando..."
+                                  : "Selecciona"}
+                              </option>
+                              {categorias.map((categoria) => (
+                                <option key={categoria.id} value={categoria.id}>
+                                  {categoria.nombre ?? "Sin nombre"}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            mov.categoria_nombre ?? "Sin categoría"
+                          )}
                         </td>
-                        <td className="px-3 py-2">
-                          {mov.detalle ?? "—"}
+                        <td
+                          className="px-3 py-2 cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "detalle")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "detalle") ? (
+                            <input
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={editSaving}
+                              list="detalle-opciones"
+                            />
+                          ) : (
+                            mov.detalle ?? "—"
+                          )}
                         </td>
-                        <td className="px-3 py-2">{kindLabel}</td>
-                        <td className="px-3 py-2">
-                          {mov.fijo ? "Sí" : "No"}
+                        <td
+                          className="px-3 py-2 cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "tipo")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "tipo") ? (
+                            <select
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={editSaving}
+                            >
+                              <option value="">Selecciona</option>
+                              <option value="ingreso">Ingreso</option>
+                              <option value="gasto">Gasto</option>
+                            </select>
+                          ) : (
+                            kindLabel
+                          )}
                         </td>
-                        <td className="px-3 py-2 text-right">
-                          {formatMovementAmount(mov)}
+                        <td
+                          className="px-3 py-2 cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "fijo")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "fijo") ? (
+                            <select
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={editSaving}
+                            >
+                              <option value="no">No</option>
+                              <option value="si">Sí</option>
+                            </select>
+                          ) : (
+                            (mov.fijo ? "Sí" : "No")
+                          )}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right cursor-pointer"
+                          onDoubleClick={() => startEdit(mov, "importe")}
+                          title="Doble click para editar"
+                        >
+                          {isEditing(mov.id, "importe") ? (
+                            <input
+                              className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-right text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                              value={editingValue}
+                              onChange={(event) =>
+                                setEditingValue(event.target.value)
+                              }
+                              onBlur={commitEdit}
+                              onKeyDown={handleEditKeyDown}
+                              disabled={editSaving}
+                              inputMode="decimal"
+                            />
+                          ) : (
+                            formatMovementAmount(mov)
+                          )}
                         </td>
                       </tr>
                     );
