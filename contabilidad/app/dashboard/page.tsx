@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
 
@@ -398,9 +399,11 @@ export default function DashboardPage() {
       ).sort((a, b) => b - a);
 
       setAvailableYears(years);
-      setSelectedYear(
-        years.includes(CURRENT_YEAR) ? CURRENT_YEAR : years[0] ?? CURRENT_YEAR
-      );
+      setSelectedYear((prev) => {
+        if (years.includes(prev)) return prev;
+        if (years.includes(CURRENT_YEAR)) return CURRENT_YEAR;
+        return years[0] ?? CURRENT_YEAR;
+      });
     };
 
     loadYears();
@@ -1538,17 +1541,40 @@ export default function DashboardPage() {
               {todayLabel}
             </div>
             {session && !sessionLoading && (
-              <>
+              <div className="flex flex-wrap items-center gap-3">
                 <span className="rounded-full border border-black/10 bg-[var(--surface)] px-4 py-2 text-sm text-[var(--foreground)] shadow-sm dark:border-white/10">
                   {session.user.email}
                 </span>
-                <button
-                  onClick={handleSignOut}
-                  className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
-                >
-                  Cerrar sesión
-                </button>
-              </>
+                <div className="flex flex-col items-end gap-2">
+                  <button
+                    onClick={handleSignOut}
+                    className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] dark:border-white/10"
+                  >
+                    Cerrar sesión
+                  </button>
+                  {selectedLibroId ? (
+                    <Link
+                      href={{
+                        pathname: "/movimientos",
+                        query: { libro: selectedLibroId },
+                      }}
+                      title="Añadir movimientos"
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
+                    >
+                      +
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      title="Añadir movimientos"
+                      disabled
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:border-black/20 disabled:text-black/30 dark:disabled:border-white/20 dark:disabled:text-white/30"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </header>
