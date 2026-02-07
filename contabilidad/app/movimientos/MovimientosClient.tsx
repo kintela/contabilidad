@@ -205,6 +205,7 @@ export default function MovimientosClient({
   const [deleteCandidate, setDeleteCandidate] = useState<Movimiento | null>(
     null
   );
+  const [searchText, setSearchText] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -521,6 +522,29 @@ export default function MovimientosClient({
     const day = String(dayValue).padStart(2, "0");
     return `${addYear}-${month}-${day}`;
   }, [addYear, addMonth, addDay]);
+
+  const filteredMovimientos = useMemo(() => {
+    const query = normalizeText(searchText.trim());
+    if (!query) return movimientos;
+    const dateFormatter = new Intl.DateTimeFormat("es-ES", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
+    return movimientos.filter((mov) => {
+      const fijoLabel =
+        typeof mov.fijo === "boolean" ? (mov.fijo ? "fijo" : "variable") : "";
+      const parts = [
+        mov.fecha ?? "",
+        dateFormatter.format(new Date(mov.fecha)),
+        mov.categoria_nombre ?? "",
+        mov.detalle ?? "",
+        mov.tipo ?? "",
+        fijoLabel,
+      ];
+      return normalizeText(parts.join(" ")).includes(query);
+    });
+  }, [movimientos, searchText]);
 
   const parseImporteValue = (value: string) => {
     const trimmed = value.trim();
@@ -867,22 +891,8 @@ export default function MovimientosClient({
       <div className="pointer-events-none absolute right-8 top-32 h-48 w-48 rounded-full bg-amber-300/30 blur-[100px]" />
 
       <div className="relative mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-10 lg:px-12">
-        <header className="flex flex-wrap items-start justify-between gap-6">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-              Movimientos
-            </p>
-            <h1
-              className="mt-2 text-4xl font-semibold leading-tight text-[var(--foreground)] sm:text-5xl"
-              style={{ fontFamily: "var(--font-fraunces)" }}
-            >
-              {showOnlyTable ? "Movimientos del libro" : "Añadir movimientos"}
-            </h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              Libro · {selectedLibro?.nombre ?? "Sin libro seleccionado"}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-3">
+        <header className="flex flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="rounded-full border border-black/10 bg-[var(--surface)] px-4 py-2 text-sm text-[var(--muted)] shadow-sm dark:border-white/10">
               {todayLabel}
             </div>
@@ -892,6 +902,22 @@ export default function MovimientosClient({
             >
               Volver al dashboard
             </Link>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                Movimientos
+              </p>
+              <h1
+                className="mt-2 text-4xl font-semibold leading-tight text-[var(--foreground)] sm:text-5xl"
+                style={{ fontFamily: "var(--font-fraunces)" }}
+              >
+                {showOnlyTable ? "Movimientos del libro" : "Añadir movimientos"}
+              </h1>
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                Libro · {selectedLibro?.nombre ?? "Sin libro seleccionado"}
+              </p>
+            </div>
           </div>
         </header>
 
@@ -1135,8 +1161,15 @@ export default function MovimientosClient({
                 Ordenados por fecha · {selectedLibro?.nombre ?? "Sin libro"}
               </p>
             </div>
+            <input
+              className="min-w-[220px] rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-transparent focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="Buscar por texto..."
+              aria-label="Buscar movimientos"
+            />
             <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
-              Total: {movimientos.length}
+              Total: {filteredMovimientos.length}
             </span>
             {movimientosLoading && (
               <span className="text-xs text-[var(--muted)]">
@@ -1174,17 +1207,19 @@ export default function MovimientosClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5 text-[var(--foreground)] dark:divide-white/10">
-                {movimientos.length === 0 ? (
+                {filteredMovimientos.length === 0 ? (
                   <tr>
                     <td
                       colSpan={7}
                       className="px-3 py-6 text-center text-sm text-[var(--muted)]"
                     >
-                      Sin movimientos en este libro.
+                      {searchText.trim()
+                        ? "No hay movimientos que coincidan con la búsqueda."
+                        : "Sin movimientos en este libro."}
                     </td>
                   </tr>
                 ) : (
-                  movimientos.map((mov) => {
+                  filteredMovimientos.map((mov) => {
                     const kind = resolveKind(mov);
                     const kindLabel =
                       kind === "ingreso"
