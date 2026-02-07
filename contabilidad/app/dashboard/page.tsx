@@ -1013,9 +1013,6 @@ export default function DashboardPage() {
     return { years };
   }, [yearlyMovimientos]);
 
-  const yearlyCategoryWidth = 84;
-  const yearlyRowHeight = 48;
-  const yearlyTotalColumnWidth = 96;
   const yearlyYearOptions = yearlyEvolution.years
     .slice()
     .sort((a, b) => b - a);
@@ -1060,33 +1057,14 @@ export default function DashboardPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [yearlyMovimientos, selectedYearlyYear, selectedYearlyCategory]);
 
-
-  const yearlyDisplay = useMemo(() => {
+  const yearlyLineData = useMemo(() => {
+    const selectedYear =
+      selectedYearlyYear === "todos" ? null : Number(selectedYearlyYear);
     const yearsSet = new Set<number>();
-    const map = new Map<
-      string,
-      {
-        category: string;
-        ingresoFijo: Record<number, number>;
-        ingresoVariable: Record<number, number>;
-        gastoFijo: Record<number, number>;
-        gastoVariable: Record<number, number>;
-      }
-    >();
-
-    const ensureCategory = (key: string, label: string) => {
-      const existing = map.get(key);
-      if (existing) return existing;
-      const next = {
-        category: label,
-        ingresoFijo: {} as Record<number, number>,
-        ingresoVariable: {} as Record<number, number>,
-        gastoFijo: {} as Record<number, number>,
-        gastoVariable: {} as Record<number, number>,
-      };
-      map.set(key, next);
-      return next;
-    };
+    const ingresoFijo: Record<number, number> = {};
+    const ingresoVariable: Record<number, number> = {};
+    const gastoFijo: Record<number, number> = {};
+    const gastoVariable: Record<number, number> = {};
 
     const addTo = (
       record: Record<number, number>,
@@ -1096,32 +1074,16 @@ export default function DashboardPage() {
       record[year] = (record[year] ?? 0) + amount;
     };
 
-    const selectedYear =
-      selectedYearlyYear === "todos" ? null : Number(selectedYearlyYear);
-
     yearlyMovimientos.forEach((mov) => {
       const amount = Math.abs(Number(mov.importe ?? 0));
       if (!Number.isFinite(amount) || amount === 0) return;
 
-      const tipoKind = normalizeKindLabel(mov.tipo);
-      const kind =
-        tipoKind ??
-        (Number(mov.importe ?? 0) < 0 ? ("gasto" as const) : "ingreso");
-      const fijoRaw = mov.fijo as unknown;
-      const fijoLabel = String(fijoRaw ?? "").toLowerCase();
-      const isFijo =
-        fijoRaw === true ||
-        fijoRaw === 1 ||
-        fijoRaw === "1" ||
-        fijoLabel === "true" ||
-        fijoLabel === "t";
       const year =
         typeof mov.fecha === "string"
           ? Number(mov.fecha.slice(0, 4)) || new Date(mov.fecha).getFullYear()
           : new Date(mov.fecha).getFullYear();
       if (!Number.isFinite(year)) return;
       if (selectedYear !== null && year !== selectedYear) return;
-      yearsSet.add(year);
 
       const categoryLabel = mov.categoria_nombre ?? "Sin categoría";
       if (
@@ -1140,155 +1102,114 @@ export default function DashboardPage() {
       ) {
         return;
       }
-      const categoryKey = mov.categoria_id ?? categoryLabel;
-      const entry = ensureCategory(categoryKey, categoryLabel);
+
+      yearsSet.add(year);
+
+      const tipoKind = normalizeKindLabel(mov.tipo);
+      const kind =
+        tipoKind ??
+        (Number(mov.importe ?? 0) < 0 ? ("gasto" as const) : "ingreso");
+      const fijoRaw = mov.fijo as unknown;
+      const fijoLabel = String(fijoRaw ?? "").toLowerCase();
+      const isFijo =
+        fijoRaw === true ||
+        fijoRaw === 1 ||
+        fijoRaw === "1" ||
+        fijoLabel === "true" ||
+        fijoLabel === "t";
 
       if (kind === "ingreso") {
         if (isFijo) {
-          addTo(entry.ingresoFijo, year, amount);
+          addTo(ingresoFijo, year, amount);
         } else {
-          addTo(entry.ingresoVariable, year, amount);
+          addTo(ingresoVariable, year, amount);
         }
       } else if (isFijo) {
-        addTo(entry.gastoFijo, year, amount);
+        addTo(gastoFijo, year, amount);
       } else {
-        addTo(entry.gastoVariable, year, amount);
+        addTo(gastoVariable, year, amount);
       }
     });
 
     const years = Array.from(yearsSet).sort((a, b) => a - b);
-    const hasKind = showYearlyIngresos || showYearlyGastos;
-    const hasFijo = showYearlyFijos || showYearlyVariables;
 
-    if (years.length === 0 || !hasKind || !hasFijo) {
-      return {
-        years,
-        categories: [] as {
-          category: string;
-          ingresoFijo: Record<number, number>;
-          ingresoVariable: Record<number, number>;
-          gastoFijo: Record<number, number>;
-          gastoVariable: Record<number, number>;
-          totalFijo: number;
-          totalVariable: number;
-          total: number;
-        }[],
-        maxValue: 1,
-        totalsByYear: {} as Record<number, number>,
-        totalsByYearFijo: {} as Record<number, number>,
-        totalsByYearVariable: {} as Record<number, number>,
-        grandTotal: 0,
-        grandTotalFijo: 0,
-        grandTotalVariable: 0,
-      };
+    const series: {
+      key: string;
+      label: string;
+      color: string;
+      values: number[];
+      strokeWidth: number;
+      dashed: boolean;
+    }[] = [];
+
+    const pushSeries = (
+      key: string,
+      label: string,
+      color: string,
+      record: Record<number, number>,
+      strokeWidth = 2,
+      dashed = false
+    ) => {
+      if (years.length === 0) return;
+      series.push({
+        key,
+        label,
+        color,
+        values: years.map((year) => record[year] ?? 0),
+        strokeWidth,
+        dashed,
+      });
+    };
+
+    if (showYearlyIngresos && showYearlyFijos) {
+      pushSeries("ingresoFijo", "Ingreso fijo", "#10b981", ingresoFijo);
+    }
+    if (showYearlyIngresos && showYearlyVariables) {
+      pushSeries(
+        "ingresoVariable",
+        "Ingreso variable",
+        "#6ee7b7",
+        ingresoVariable
+      );
+    }
+    if (showYearlyGastos && showYearlyFijos) {
+      pushSeries("gastoFijo", "Gasto fijo", "#f43f5e", gastoFijo);
+    }
+    if (showYearlyGastos && showYearlyVariables) {
+      pushSeries("gastoVariable", "Gasto variable", "#fda4af", gastoVariable);
     }
 
-    const categories = Array.from(map.values())
-      .map((entry) => {
-        let totalFijo = 0;
-        let totalVariable = 0;
-        years.forEach((year) => {
-          if (showYearlyIngresos && showYearlyFijos) {
-            totalFijo += entry.ingresoFijo[year] ?? 0;
-          }
-          if (showYearlyGastos && showYearlyFijos) {
-            totalFijo += entry.gastoFijo[year] ?? 0;
-          }
-          if (showYearlyIngresos && showYearlyVariables) {
-            totalVariable += entry.ingresoVariable[year] ?? 0;
-          }
-          if (showYearlyGastos && showYearlyVariables) {
-            totalVariable += entry.gastoVariable[year] ?? 0;
-          }
-        });
-        return {
-          ...entry,
-          totalFijo,
-          totalVariable,
-          total: totalFijo + totalVariable,
-        };
-      })
-      .filter((entry) => entry.total > 0)
-      .sort((a, b) => b.total - a.total);
-
-    let maxValue = 1;
-    const totalsByYear: Record<number, number> = {};
-    const totalsByYearFijo: Record<number, number> = {};
-    const totalsByYearVariable: Record<number, number> = {};
-    years.forEach((year) => {
-      totalsByYear[year] = 0;
-      totalsByYearFijo[year] = 0;
-      totalsByYearVariable[year] = 0;
-    });
-    categories.forEach((category) => {
+    if (showYearlyIngresos && showYearlyFijos && showYearlyVariables) {
+      const ingresoTotal: Record<number, number> = {};
       years.forEach((year) => {
-        const fijoValue =
-          (showYearlyIngresos && showYearlyFijos
-            ? category.ingresoFijo[year] ?? 0
-            : 0) +
-          (showYearlyGastos && showYearlyFijos
-            ? category.gastoFijo[year] ?? 0
-            : 0);
-        const variableValue =
-          (showYearlyIngresos && showYearlyVariables
-            ? category.ingresoVariable[year] ?? 0
-            : 0) +
-          (showYearlyGastos && showYearlyVariables
-            ? category.gastoVariable[year] ?? 0
-            : 0);
-        const yearTotal =
-          fijoValue + variableValue;
-        totalsByYear[year] = (totalsByYear[year] ?? 0) + yearTotal;
-        totalsByYearFijo[year] =
-          (totalsByYearFijo[year] ?? 0) + fijoValue;
-        totalsByYearVariable[year] =
-          (totalsByYearVariable[year] ?? 0) + variableValue;
-        if (showYearlyIngresos && showYearlyFijos) {
-          maxValue = Math.max(maxValue, category.ingresoFijo[year] ?? 0);
-        }
-        if (showYearlyIngresos && showYearlyVariables) {
-          maxValue = Math.max(
-            maxValue,
-            category.ingresoVariable[year] ?? 0
-          );
-        }
-        if (showYearlyGastos && showYearlyFijos) {
-          maxValue = Math.max(maxValue, category.gastoFijo[year] ?? 0);
-        }
-        if (showYearlyGastos && showYearlyVariables) {
-          maxValue = Math.max(
-            maxValue,
-            category.gastoVariable[year] ?? 0
-          );
-        }
+        ingresoTotal[year] =
+          (ingresoFijo[year] ?? 0) + (ingresoVariable[year] ?? 0);
       });
-    });
+      pushSeries(
+        "ingresoTotal",
+        "Ingreso total",
+        "#059669",
+        ingresoTotal,
+        4,
+        true
+      );
+    }
 
-    const grandTotal = Object.values(totalsByYear).reduce(
-      (sum, value) => sum + value,
-      0
+    if (showYearlyGastos && showYearlyFijos && showYearlyVariables) {
+      const gastoTotal: Record<number, number> = {};
+      years.forEach((year) => {
+        gastoTotal[year] =
+          (gastoFijo[year] ?? 0) + (gastoVariable[year] ?? 0);
+      });
+      pushSeries("gastoTotal", "Gasto total", "#e11d48", gastoTotal, 4, true);
+    }
+
+    const maxValue = Math.max(
+      1,
+      ...series.flatMap((item) => item.values)
     );
 
-    const grandTotalFijo = Object.values(totalsByYearFijo).reduce(
-      (sum, value) => sum + value,
-      0
-    );
-    const grandTotalVariable = Object.values(totalsByYearVariable).reduce(
-      (sum, value) => sum + value,
-      0
-    );
-
-    return {
-      years,
-      categories,
-      maxValue,
-      totalsByYear,
-      totalsByYearFijo,
-      totalsByYearVariable,
-      grandTotal,
-      grandTotalFijo,
-      grandTotalVariable,
-    };
+    return { years, series, maxValue };
   }, [
     yearlyMovimientos,
     showYearlyIngresos,
@@ -1300,28 +1221,56 @@ export default function DashboardPage() {
     selectedYearlyDetail,
   ]);
 
-  const yearlyDotSize = (value: number) => {
-    if (value <= 0) return 0;
-    const min = 4;
-    const max = 12;
-    if (yearlyDisplay.maxValue <= 0) return min;
-    return Math.round(
-      min + (value / yearlyDisplay.maxValue) * (max - min)
+  const yearlyLineChart = useMemo(() => {
+    if (yearlyLineData.years.length === 0) return null;
+    const width = Math.max(640, yearlyLineData.years.length * 120);
+    const height = 240;
+    const padding = { top: 16, right: 24, bottom: 28, left: 52 };
+    const maxValue = Math.max(1, yearlyLineData.maxValue);
+    const rangeY = height - padding.top - padding.bottom;
+    const rangeX = width - padding.left - padding.right;
+    const xStep =
+      yearlyLineData.years.length > 1
+        ? rangeX / (yearlyLineData.years.length - 1)
+        : 0;
+    const xPositions = yearlyLineData.years.map((_, index) =>
+      yearlyLineData.years.length > 1
+        ? padding.left + index * xStep
+        : padding.left + rangeX / 2
     );
-  };
+    const yForValue = (value: number) =>
+      padding.top + (1 - value / maxValue) * rangeY;
+    const tickCount = 4;
+    const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
+      const ratio = index / tickCount;
+      const value = maxValue * (1 - ratio);
+      return { value, y: padding.top + ratio * rangeY };
+    });
 
-  const yearlyFixedTextClass =
-    showYearlyIngresos && !showYearlyGastos
-      ? "text-emerald-500"
-      : showYearlyGastos && !showYearlyIngresos
-        ? "text-rose-500"
-        : "text-[var(--foreground)]";
-  const yearlyVariableTextClass =
-    showYearlyIngresos && !showYearlyGastos
-      ? "text-emerald-300"
-      : showYearlyGastos && !showYearlyIngresos
-        ? "text-rose-300"
-        : "text-[var(--muted)]";
+    const series = yearlyLineData.series.map((item) => {
+      const points = item.values.map((value, index) => ({
+        x: xPositions[index],
+        y: yForValue(value),
+        value,
+        year: yearlyLineData.years[index],
+      }));
+      const path = points
+        .map((point, index) =>
+          `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`
+        )
+        .join(" ");
+      return { ...item, points, path };
+    });
+
+    return {
+      width,
+      height,
+      padding,
+      ticks,
+      series,
+      years: yearlyLineData.years,
+    };
+  }, [yearlyLineData]);
 
 
   const chartData = useMemo(() => {
@@ -2687,10 +2636,10 @@ export default function DashboardPage() {
                     className="mt-2 text-xl font-semibold text-[var(--foreground)]"
                     style={{ fontFamily: "var(--font-fraunces)" }}
                   >
-                    Ingresos y gastos por categoría
+                    Ingresos y gastos en el tiempo
                   </h3>
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    Evolucion por año agrupado por categorias
+                    Evolución anual con líneas para ingresos y gastos.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
@@ -2802,21 +2751,39 @@ export default function DashboardPage() {
                   </label>
                   <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                      <span className="h-[2px] w-6 rounded-full bg-emerald-600" />
                       Ingreso fijo
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                      <span className="h-[2px] w-6 rounded-full bg-emerald-300" />
                       Ingreso variable
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-rose-600" />
+                      <span className="h-[2px] w-6 rounded-full bg-rose-600" />
                       Gasto fijo
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-rose-300" />
+                      <span className="h-[2px] w-6 rounded-full bg-rose-300" />
                       Gasto variable
                     </span>
+                    {showYearlyIngresos &&
+                      showYearlyFijos &&
+                      showYearlyVariables && (
+                        <span className="flex items-center gap-1">
+                          <span className="flex h-[3px] w-7 items-center">
+                            <span className="h-[2px] w-full border-t-2 border-dashed border-emerald-600" />
+                          </span>
+                          Ingreso total
+                        </span>
+                      )}
+                    {showYearlyGastos && showYearlyFijos && showYearlyVariables && (
+                      <span className="flex items-center gap-1">
+                        <span className="flex h-[3px] w-7 items-center">
+                          <span className="h-[2px] w-full border-t-2 border-dashed border-rose-600" />
+                        </span>
+                        Gasto total
+                      </span>
+                    )}
                   </div>
                   {yearlyLoading && (
                     <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--muted)] shadow-sm dark:border-white/10 dark:bg-black/60">
@@ -2832,13 +2799,13 @@ export default function DashboardPage() {
                 </p>
               )}
 
-              {!yearlyLoading && yearlyEvolution.years.length === 0 && (
+              {!yearlyLoading && yearlyLineData.years.length === 0 && (
                 <div className="mt-4 rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
                   No hay datos suficientes para mostrar la evolución anual.
                 </div>
               )}
 
-              {yearlyEvolution.years.length > 0 && (
+              {yearlyLineData.years.length > 0 && (
                 <div className="mt-6">
                   {(!showYearlyIngresos && !showYearlyGastos) ||
                   (!showYearlyFijos && !showYearlyVariables) ? (
@@ -2846,7 +2813,8 @@ export default function DashboardPage() {
                       Activa ingresos/gastos y fijos/variables para ver la
                       evolución anual.
                     </div>
-                  ) : yearlyDisplay.categories.length === 0 ? (
+                  ) : yearlyLineData.series.length === 0 ||
+                    !yearlyLineChart ? (
                     <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
                       No hay datos suficientes para mostrar la evolución anual.
                     </div>
@@ -2856,294 +2824,76 @@ export default function DashboardPage() {
                       style={{ scrollbarGutter: "stable" }}
                     >
                       <div className="min-w-max">
-                        <div className="flex flex-col gap-2">
-                          {[...yearlyDisplay.years].reverse().map((year) => (
-                            <div key={year} className="flex items-end gap-4">
-                              <div
-                                className="flex items-end justify-end text-[11px] text-[var(--muted)]"
-                                style={{ width: "2.5rem", height: yearlyRowHeight }}
+                        <svg
+                          width={yearlyLineChart.width}
+                          height={yearlyLineChart.height}
+                          viewBox={`0 0 ${yearlyLineChart.width} ${yearlyLineChart.height}`}
+                        >
+                          {yearlyLineChart.ticks.map((tick) => (
+                            <g key={`tick-${tick.y}`}>
+                              <line
+                                x1={yearlyLineChart.padding.left}
+                                x2={
+                                  yearlyLineChart.width -
+                                  yearlyLineChart.padding.right
+                                }
+                                y1={tick.y}
+                                y2={tick.y}
+                                stroke="rgba(148,163,184,0.2)"
+                                strokeWidth="1"
+                              />
+                              <text
+                                x={yearlyLineChart.padding.left - 10}
+                                y={tick.y + 4}
+                                textAnchor="end"
+                                className="fill-[var(--muted)] text-[10px]"
                               >
-                                {year}
-                              </div>
-                              <div className="flex items-end gap-4">
-                                {yearlyDisplay.categories.map((category) => {
-                                  const ingresoFijoValue =
-                                    category.ingresoFijo[year] ?? 0;
-                                  const ingresoVariableValue =
-                                    category.ingresoVariable[year] ?? 0;
-                                  const gastoFijoValue =
-                                    category.gastoFijo[year] ?? 0;
-                                  const gastoVariableValue =
-                                    category.gastoVariable[year] ?? 0;
-                                  const showIngresoFijoDot =
-                                    showYearlyIngresos &&
-                                    showYearlyFijos &&
-                                    ingresoFijoValue > 0;
-                                  const showIngresoVariableDot =
-                                    showYearlyIngresos &&
-                                    showYearlyVariables &&
-                                    ingresoVariableValue > 0;
-                                  const showGastoFijoDot =
-                                    showYearlyGastos &&
-                                    showYearlyFijos &&
-                                    gastoFijoValue > 0;
-                                  const showGastoVariableDot =
-                                    showYearlyGastos &&
-                                    showYearlyVariables &&
-                                    gastoVariableValue > 0;
-                                  return (
-                                    <div
-                                      key={`${category.category}-${year}`}
-                                      className="relative"
-                                      style={{
-                                        width: `${yearlyCategoryWidth}px`,
-                                        height: `${yearlyRowHeight}px`,
-                                      }}
-                                    >
-                                      <div className="absolute left-0 right-0 bottom-0 h-px bg-black/5 dark:bg-white/10" />
-                                      {(showIngresoFijoDot ||
-                                        showIngresoVariableDot ||
-                                        showGastoFijoDot ||
-                                        showGastoVariableDot) && (
-                                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2">
-                                          <div className="flex items-end gap-2">
-                                            {showIngresoFijoDot && (
-                                              <div className="flex flex-col items-center">
-                                                <span className="mb-1 whitespace-nowrap text-[10px] font-semibold text-emerald-500">
-                                                  {formatShortCurrency(
-                                                    ingresoFijoValue
-                                                  )}
-                                                </span>
-                                                <span
-                                                  className="rounded-full bg-emerald-600"
-                                                  style={{
-                                                    width: `${yearlyDotSize(
-                                                      ingresoFijoValue
-                                                    )}px`,
-                                                    height: `${yearlyDotSize(
-                                                      ingresoFijoValue
-                                                    )}px`,
-                                                  }}
-                                                  title={`${category.category} · ${year} · Ingresos fijos: ${formatCurrency(
-                                                    ingresoFijoValue
-                                                  )}`}
-                                                />
-                                              </div>
-                                            )}
-                                            {showIngresoVariableDot && (
-                                              <div className="flex flex-col items-center">
-                                                <span className="mb-1 whitespace-nowrap text-[10px] font-semibold text-emerald-300">
-                                                  {formatShortCurrency(
-                                                    ingresoVariableValue
-                                                  )}
-                                                </span>
-                                                <span
-                                                  className="rounded-full bg-emerald-300"
-                                                  style={{
-                                                    width: `${yearlyDotSize(
-                                                      ingresoVariableValue
-                                                    )}px`,
-                                                    height: `${yearlyDotSize(
-                                                      ingresoVariableValue
-                                                    )}px`,
-                                                  }}
-                                                  title={`${category.category} · ${year} · Ingresos variables: ${formatCurrency(
-                                                    ingresoVariableValue
-                                                  )}`}
-                                                />
-                                              </div>
-                                            )}
-                                            {showGastoFijoDot && (
-                                              <div className="flex flex-col items-center">
-                                                <span className="mb-1 whitespace-nowrap text-[10px] font-semibold text-rose-500">
-                                                  {formatShortCurrency(
-                                                    gastoFijoValue
-                                                  )}
-                                                </span>
-                                                <span
-                                                  className="rounded-full bg-rose-600"
-                                                  style={{
-                                                    width: `${yearlyDotSize(
-                                                      gastoFijoValue
-                                                    )}px`,
-                                                    height: `${yearlyDotSize(
-                                                      gastoFijoValue
-                                                    )}px`,
-                                                  }}
-                                                  title={`${category.category} · ${year} · Gastos fijos: ${formatCurrency(
-                                                    gastoFijoValue
-                                                  )}`}
-                                                />
-                                              </div>
-                                            )}
-                                            {showGastoVariableDot && (
-                                              <div className="flex flex-col items-center">
-                                                <span className="mb-1 whitespace-nowrap text-[10px] font-semibold text-rose-300">
-                                                  {formatShortCurrency(
-                                                    gastoVariableValue
-                                                  )}
-                                                </span>
-                                                <span
-                                                  className="rounded-full bg-rose-300"
-                                                  style={{
-                                                    width: `${yearlyDotSize(
-                                                      gastoVariableValue
-                                                    )}px`,
-                                                    height: `${yearlyDotSize(
-                                                      gastoVariableValue
-                                                    )}px`,
-                                                  }}
-                                                  title={`${category.category} · ${year} · Gastos variables: ${formatCurrency(
-                                                    gastoVariableValue
-                                                  )}`}
-                                                />
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                                <div
-                                  className="flex items-end justify-center"
-                                  style={{
-                                    width: `${yearlyTotalColumnWidth}px`,
-                                    height: `${yearlyRowHeight}px`,
-                                  }}
-                                >
-                                  <div className="flex h-full w-full flex-col items-center justify-end gap-1">
-                                    {showYearlyFijos && (
-                                      <span
-                                        className={`whitespace-nowrap text-[10px] font-semibold ${yearlyFixedTextClass}`}
-                                      >
-                                        {formatShortCurrency(
-                                          yearlyDisplay.totalsByYearFijo[year] ??
-                                            0
-                                        )}
-                                      </span>
-                                    )}
-                                    {showYearlyVariables && (
-                                      <span
-                                        className={`whitespace-nowrap text-[10px] font-semibold ${yearlyVariableTextClass}`}
-                                      >
-                                        {formatShortCurrency(
-                                          yearlyDisplay.totalsByYearVariable[year] ??
-                                            0
-                                        )}
-                                      </span>
-                                    )}
-                                    {showYearlyFijos && showYearlyVariables && (
-                                      <span className="whitespace-nowrap text-[10px] font-semibold text-[var(--foreground)]">
-                                        {formatShortCurrency(
-                                          yearlyDisplay.totalsByYear[year] ?? 0
-                                        )}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
+                                {formatShortCurrency(tick.value)}
+                              </text>
+                            </g>
                           ))}
-                        </div>
-                        <div className="mt-3 flex items-start gap-4">
-                          <span
-                            className="text-right text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]"
-                            style={{ width: "2.5rem" }}
-                          >
-                            Año
-                          </span>
-                          <div className="flex items-start gap-4">
-                            {yearlyDisplay.categories.map((category) => (
-                              <span
-                                key={`cat-${category.category}`}
-                                className="text-center text-[11px] leading-snug text-[var(--muted)]"
-                                style={{ width: `${yearlyCategoryWidth}px` }}
-                              >
-                                {category.category}
-                              </span>
-                            ))}
-                            <span
-                              className="text-center text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]"
-                              style={{ width: `${yearlyTotalColumnWidth}px` }}
+                          {yearlyLineChart.series.map((serie) => (
+                            <g key={serie.key}>
+                              <path
+                                d={serie.path}
+                                fill="none"
+                                stroke={serie.color}
+                                strokeWidth={serie.strokeWidth ?? 2}
+                                strokeDasharray={serie.dashed ? "6 6" : "0"}
+                              />
+                              {serie.points.map((point) => (
+                                <circle
+                                  key={`${serie.key}-${point.year}`}
+                                  cx={point.x}
+                                  cy={point.y}
+                                  r={serie.strokeWidth >= 4 ? 4 : 3}
+                                  fill={serie.color}
+                                  className="cursor-pointer"
+                                >
+                                  <title>
+                                    {`${serie.label} · ${point.year}: ${formatCurrency(
+                                      point.value
+                                    )}`}
+                                  </title>
+                                </circle>
+                              ))}
+                            </g>
+                          ))}
+                          {yearlyLineChart.years.map((year, index) => (
+                            <text
+                              key={`year-${year}`}
+                              x={
+                                yearlyLineChart.series[0]?.points[index]?.x ??
+                                yearlyLineChart.padding.left
+                              }
+                              y={yearlyLineChart.height - 6}
+                              textAnchor="middle"
+                              className="fill-[var(--muted)] text-[11px] uppercase tracking-[0.3em]"
                             >
-                              Total
-                            </span>
-                          </div>
-                        </div>
-                        <div className="mt-1 flex items-start gap-4">
-                          <span
-                            className="text-right text-[11px] font-semibold text-[var(--muted)]"
-                            style={{ width: "2.5rem" }}
-                          >
-                            Total
-                          </span>
-                          <div className="flex items-start gap-4">
-                            {yearlyDisplay.categories.map((category) => (
-                              <span
-                                key={`cat-total-${category.category}`}
-                                className="text-center text-[11px] font-semibold text-[var(--foreground)]"
-                                style={{ width: `${yearlyCategoryWidth}px` }}
-                              >
-                                <span className="flex flex-col items-center gap-1">
-                                  {showYearlyFijos && (
-                                    <span
-                                      className={`whitespace-nowrap text-[10px] font-semibold ${yearlyFixedTextClass}`}
-                                    >
-                                      {formatShortCurrency(category.totalFijo)}
-                                    </span>
-                                  )}
-                                  {showYearlyVariables && (
-                                    <span
-                                      className={`whitespace-nowrap text-[10px] font-semibold ${yearlyVariableTextClass}`}
-                                    >
-                                      {formatShortCurrency(
-                                        category.totalVariable
-                                      )}
-                                    </span>
-                                  )}
-                                  {showYearlyFijos && showYearlyVariables && (
-                                    <span className="whitespace-nowrap text-[10px] font-semibold text-[var(--foreground)]">
-                                      {formatShortCurrency(category.total)}
-                                    </span>
-                                  )}
-                                </span>
-                              </span>
-                            ))}
-                            <span
-                              className="text-center text-[11px] font-semibold text-[var(--foreground)]"
-                              style={{ width: `${yearlyTotalColumnWidth}px` }}
-                            >
-                              <span className="flex flex-col items-center gap-1">
-                                {showYearlyFijos && (
-                                  <span
-                                    className={`whitespace-nowrap text-[10px] font-semibold ${yearlyFixedTextClass}`}
-                                  >
-                                    {formatShortCurrency(
-                                      yearlyDisplay.grandTotalFijo
-                                    )}
-                                  </span>
-                                )}
-                                {showYearlyVariables && (
-                                  <span
-                                    className={`whitespace-nowrap text-[10px] font-semibold ${yearlyVariableTextClass}`}
-                                  >
-                                    {formatShortCurrency(
-                                      yearlyDisplay.grandTotalVariable
-                                    )}
-                                  </span>
-                                )}
-                                {showYearlyFijos && showYearlyVariables && (
-                                  <span className="whitespace-nowrap text-[10px] font-semibold text-[var(--foreground)]">
-                                    {formatShortCurrency(
-                                      yearlyDisplay.grandTotal
-                                    )}
-                                  </span>
-                                )}
-                              </span>
-                            </span>
-                          </div>
-                        </div>
+                              {year}
+                            </text>
+                          ))}
+                        </svg>
                       </div>
                     </div>
                   )}
