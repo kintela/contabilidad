@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
 
@@ -146,12 +146,19 @@ const sortMovimientos = (rows: Movimiento[]) =>
 
 type MovimientosClientProps = {
   initialLibroId?: string | null;
+  onlyTable?: boolean;
 };
 
 export default function MovimientosClient({
   initialLibroId = null,
+  onlyTable = false,
 }: MovimientosClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryLibroId = searchParams.get("libro");
+  const queryView = searchParams.get("view");
+  const showOnlyTable = onlyTable || queryView === "tabla";
+  const requestedLibroId = queryLibroId ?? initialLibroId;
 
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -161,7 +168,7 @@ export default function MovimientosClient({
   const [librosLoading, setLibrosLoading] = useState(false);
   const [librosError, setLibrosError] = useState<string | null>(null);
   const [selectedLibroId, setSelectedLibroId] = useState<string | null>(
-    initialLibroId
+    initialLibroId ?? null
   );
 
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -277,9 +284,10 @@ export default function MovimientosClient({
       );
       setLibros(ordered);
 
+      const desiredId = requestedLibroId;
       const currentId =
-        selectedLibroId && ordered.some((libro) => libro.id === selectedLibroId)
-          ? selectedLibroId
+        desiredId && ordered.some((libro) => libro.id === desiredId)
+          ? desiredId
           : null;
 
       if (currentId) {
@@ -303,7 +311,7 @@ export default function MovimientosClient({
     };
 
     loadLibros();
-  }, [session, selectedLibroId]);
+  }, [session, requestedLibroId]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -340,7 +348,10 @@ export default function MovimientosClient({
   }, [session]);
 
   useEffect(() => {
-    if (!selectedLibroId) return;
+    const libroId = showOnlyTable
+      ? requestedLibroId ?? selectedLibroId
+      : selectedLibroId;
+    if (!libroId) return;
 
     const loadYears = async () => {
       setMovimientosError(null);
@@ -353,7 +364,7 @@ export default function MovimientosClient({
         const { data, error, count } = await supabase
           .from("movimientos")
           .select("fecha", { count: "exact" })
-          .eq("libro_id", selectedLibroId)
+          .eq("libro_id", libroId)
           .range(from, from + pageSize - 1);
 
         if (error) {
@@ -402,10 +413,13 @@ export default function MovimientosClient({
     };
 
     loadYears();
-  }, [selectedLibroId, refreshToken]);
+  }, [selectedLibroId, requestedLibroId, showOnlyTable, refreshToken]);
 
   useEffect(() => {
-    if (!selectedLibroId) return;
+    const libroId = showOnlyTable
+      ? requestedLibroId ?? selectedLibroId
+      : selectedLibroId;
+    if (!libroId) return;
 
     const loadMovimientos = async () => {
       setMovimientosLoading(true);
@@ -416,7 +430,7 @@ export default function MovimientosClient({
         .select(
           "id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en"
         )
-        .eq("libro_id", selectedLibroId)
+        .eq("libro_id", libroId)
         .order("fecha", { ascending: false })
         .order("creado_en", { ascending: false });
 
@@ -446,7 +460,7 @@ export default function MovimientosClient({
     };
 
     loadMovimientos();
-  }, [selectedLibroId, categorias, refreshToken]);
+  }, [selectedLibroId, requestedLibroId, showOnlyTable, categorias, refreshToken]);
 
   const addYearOptions = useMemo(() => {
     const set = new Set<number>(availableYears);
@@ -464,7 +478,10 @@ export default function MovimientosClient({
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [movimientos]);
 
-  const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
+  const activeLibroId = showOnlyTable
+    ? requestedLibroId ?? selectedLibroId
+    : selectedLibroId;
+  const selectedLibro = libros.find((libro) => libro.id === activeLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
 
   const formatCurrency = (value: number) =>
@@ -859,7 +876,7 @@ export default function MovimientosClient({
               className="mt-2 text-4xl font-semibold leading-tight text-[var(--foreground)] sm:text-5xl"
               style={{ fontFamily: "var(--font-fraunces)" }}
             >
-              Añadir movimientos
+              {showOnlyTable ? "Movimientos del libro" : "Añadir movimientos"}
             </h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
               Libro · {selectedLibro?.nombre ?? "Sin libro seleccionado"}
@@ -884,7 +901,8 @@ export default function MovimientosClient({
           </p>
         )}
 
-        <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+        {!showOnlyTable && (
+          <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2
@@ -1098,9 +1116,13 @@ export default function MovimientosClient({
               </button>
             </div>
           </form>
-        </section>
+          </section>
+        )}
 
-        <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+        <section
+          id="tabla-movimientos"
+          className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10"
+        >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3

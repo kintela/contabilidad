@@ -11,9 +11,15 @@ export default function MovimientosPage({
   searchParams?: SearchParams;
 }) {
   const libroParam = searchParams?.libro;
+  const viewParam = searchParams?.view;
   const initialLibroId = Array.isArray(libroParam)
     ? libroParam[0] ?? null
     : libroParam ?? null;
+  const viewValue = Array.isArray(viewParam)
+    ? viewParam[0] ?? ""
+    : viewParam ?? "";
+  const onlyTable = viewValue === "tabla";
+  const clientKey = `${initialLibroId ?? "none"}:${onlyTable ? "tabla" : "full"}`;
 
   return (
     <Suspense
@@ -23,7 +29,11 @@ export default function MovimientosPage({
         </div>
       }
     >
-      <MovimientosClient initialLibroId={initialLibroId} />
+      <MovimientosClient
+        key={clientKey}
+        initialLibroId={initialLibroId}
+        onlyTable={onlyTable}
+      />
     </Suspense>
   );
 }

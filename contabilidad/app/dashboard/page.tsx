@@ -1469,6 +1469,13 @@ export default function DashboardPage() {
       }`
     : null;
 
+  const movimientosHref = selectedLibroId
+    ? `/movimientos?libro=${encodeURIComponent(selectedLibroId)}`
+    : "/movimientos";
+  const movimientosTableHref = selectedLibroId
+    ? `/movimientos?libro=${encodeURIComponent(selectedLibroId)}&view=tabla#tabla-movimientos`
+    : "/movimientos?view=tabla#tabla-movimientos";
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(1200px_circle_at_8%_-10%,rgba(15,118,110,0.2),transparent_60%),radial-gradient(900px_circle_at_110%_10%,rgba(251,146,60,0.2),transparent_55%)]">
       <div className="pointer-events-none absolute -left-24 top-24 h-64 w-64 rounded-full bg-emerald-400/20 blur-[120px]" />
@@ -1501,27 +1508,69 @@ export default function DashboardPage() {
                   >
                     Cerrar sesión
                   </button>
-                  {selectedLibroId ? (
-                    <Link
-                      href={{
-                        pathname: "/movimientos",
-                        query: { libro: selectedLibroId },
-                      }}
-                      title="Añadir movimientos"
-                      className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
-                    >
-                      +
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      title="Añadir movimientos"
-                      disabled
-                      className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:border-black/20 disabled:text-black/30 dark:disabled:border-white/20 dark:disabled:text-white/30"
-                    >
-                      +
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {selectedLibroId ? (
+                      <>
+                        <Link
+                          href={movimientosTableHref}
+                          title="Ver movimientos"
+                          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-black/20 text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        >
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
+                            <circle cx="12" cy="12" r="3.5" />
+                          </svg>
+                        </Link>
+                        <Link
+                          href={movimientosHref}
+                          title="Añadir movimientos"
+                          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
+                        >
+                          +
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          title="Ver movimientos"
+                          disabled
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-black/20 text-[var(--muted)] transition disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
+                            <circle cx="12" cy="12" r="3.5" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          title="Añadir movimientos"
+                          disabled
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:border-black/20 disabled:text-black/30 dark:disabled:border-white/20 dark:disabled:text-white/30"
+                        >
+                          +
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
