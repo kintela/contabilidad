@@ -50,6 +50,8 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => {
   };
 });
 
+const MOVIMIENTOS_PAGE_SIZE = 1000;
+
 const normalizeText = (value: string) =>
   value
     .toLowerCase()
@@ -191,7 +193,11 @@ export default function MovimientosClient({
 
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [movimientosLoading, setMovimientosLoading] = useState(false);
+  const [movimientosLoadingMore, setMovimientosLoadingMore] = useState(false);
   const [movimientosError, setMovimientosError] = useState<string | null>(null);
+  const [movimientosTotal, setMovimientosTotal] = useState<number | null>(null);
+  const [movimientosPage, setMovimientosPage] = useState(0);
+  const [movimientosHasMore, setMovimientosHasMore] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [editingCell, setEditingCell] = useState<{
     id: string;
@@ -206,6 +212,9 @@ export default function MovimientosClient({
     null
   );
   const [searchText, setSearchText] = useState("");
+  const activeLibroId = showOnlyTable
+    ? requestedLibroId ?? selectedLibroId
+    : selectedLibroId;
 
   useEffect(() => {
     let isMounted = true;
@@ -349,10 +358,7 @@ export default function MovimientosClient({
   }, [session]);
 
   useEffect(() => {
-    const libroId = showOnlyTable
-      ? requestedLibroId ?? selectedLibroId
-      : selectedLibroId;
-    if (!libroId) return;
+    if (!activeLibroId) return;
 
     const loadYears = async () => {
       setMovimientosError(null);
@@ -365,7 +371,7 @@ export default function MovimientosClient({
         const { data, error, count } = await supabase
           .from("movimientos")
           .select("fecha", { count: "exact" })
-          .eq("libro_id", libroId)
+          .eq("libro_id", activeLibroId)
           .range(from, from + pageSize - 1);
 
         if (error) {
@@ -414,26 +420,29 @@ export default function MovimientosClient({
     };
 
     loadYears();
-  }, [selectedLibroId, requestedLibroId, showOnlyTable, refreshToken]);
+  }, [activeLibroId, refreshToken]);
 
   useEffect(() => {
-    const libroId = showOnlyTable
-      ? requestedLibroId ?? selectedLibroId
-      : selectedLibroId;
-    if (!libroId) return;
+    if (!activeLibroId) return;
 
     const loadMovimientos = async () => {
       setMovimientosLoading(true);
       setMovimientosError(null);
+      setMovimientosLoadingMore(false);
+      setMovimientosPage(0);
+      setMovimientosHasMore(false);
+      setMovimientosTotal(null);
 
-      const { data, error } = await supabase
+      const { data, error, count } = await supabase
         .from("movimientos")
         .select(
-          "id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en"
+          "id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en",
+          { count: "exact" }
         )
-        .eq("libro_id", libroId)
+        .eq("libro_id", activeLibroId)
         .order("fecha", { ascending: false })
-        .order("creado_en", { ascending: false });
+        .order("creado_en", { ascending: false })
+        .range(0, MOVIMIENTOS_PAGE_SIZE - 1);
 
       if (error) {
         setMovimientosError(error.message);
@@ -457,11 +466,82 @@ export default function MovimientosClient({
       }));
 
       setMovimientos(sortMovimientos(enriched));
+      setMovimientosTotal(typeof count === "number" ? count : null);
+      setMovimientosPage(1);
+      const hasMore =
+        typeof count === "number"
+          ? count > enriched.length
+          : (data?.length ?? 0) >= MOVIMIENTOS_PAGE_SIZE;
+      setMovimientosHasMore(hasMore);
       setMovimientosLoading(false);
     };
 
     loadMovimientos();
-  }, [selectedLibroId, requestedLibroId, showOnlyTable, categorias, refreshToken]);
+  }, [activeLibroId, categorias, refreshToken]);
+
+  const loadMoreMovimientos = async () => {
+    if (!activeLibroId || movimientosLoadingMore || !movimientosHasMore) {
+      return;
+    }
+
+    setMovimientosLoadingMore(true);
+    setMovimientosError(null);
+
+    const from = movimientosPage * MOVIMIENTOS_PAGE_SIZE;
+    const to = from + MOVIMIENTOS_PAGE_SIZE - 1;
+
+    const { data, error } = await supabase
+      .from("movimientos")
+      .select("id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en")
+      .eq("libro_id", activeLibroId)
+      .order("fecha", { ascending: false })
+      .order("creado_en", { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      setMovimientosError(error.message);
+      setMovimientosLoadingMore(false);
+      return;
+    }
+
+    const categoriaMap = new Map(
+      categorias.map((categoria) => [categoria.id, categoria])
+    );
+
+    const enriched = (data ?? []).map((mov) => ({
+      ...mov,
+      categoria_nombre: mov.categoria_id
+        ? categoriaMap.get(mov.categoria_id)?.nombre ?? null
+        : null,
+      categoria_kind: mov.categoria_id
+        ? categoriaMap.get(mov.categoria_id)?.kind ?? null
+        : null,
+    }));
+
+    setMovimientos((prev) => sortMovimientos([...prev, ...enriched]));
+
+    const nextPage = movimientosPage + 1;
+    setMovimientosPage(nextPage);
+    const hasMore =
+      typeof movimientosTotal === "number"
+        ? nextPage * MOVIMIENTOS_PAGE_SIZE < movimientosTotal
+        : (data?.length ?? 0) >= MOVIMIENTOS_PAGE_SIZE;
+    setMovimientosHasMore(hasMore);
+    setMovimientosLoadingMore(false);
+  };
+
+  useEffect(() => {
+    if (!searchText.trim()) return;
+    if (movimientosLoading || movimientosLoadingMore) return;
+    if (!movimientosHasMore) return;
+    void loadMoreMovimientos();
+  }, [
+    searchText,
+    movimientosHasMore,
+    movimientosLoading,
+    movimientosLoadingMore,
+    loadMoreMovimientos,
+  ]);
 
   const addYearOptions = useMemo(() => {
     const set = new Set<number>(availableYears);
@@ -479,9 +559,6 @@ export default function MovimientosClient({
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es-ES"));
   }, [movimientos]);
 
-  const activeLibroId = showOnlyTable
-    ? requestedLibroId ?? selectedLibroId
-    : selectedLibroId;
   const selectedLibro = libros.find((libro) => libro.id === activeLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
 
@@ -776,6 +853,9 @@ export default function MovimientosClient({
     setMovimientos((prev) =>
       prev.filter((item) => item.id !== deleteCandidate.id)
     );
+    setMovimientosTotal((prev) =>
+      typeof prev === "number" ? Math.max(prev - 1, 0) : prev
+    );
     setDeleteLoadingId(null);
     setDeleteCandidate(null);
   };
@@ -855,6 +935,9 @@ export default function MovimientosClient({
     };
 
     setMovimientos((prev) => sortMovimientos([enriched, ...prev]));
+    setMovimientosTotal((prev) =>
+      typeof prev === "number" ? prev + 1 : prev
+    );
 
     setAddMovimientoLoading(false);
     resetAddMovimientoForm();
@@ -1169,11 +1252,20 @@ export default function MovimientosClient({
               aria-label="Buscar movimientos"
             />
             <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
-              Total: {filteredMovimientos.length}
+              {movimientosTotal !== null
+                ? `Mostrando: ${filteredMovimientos.length} · Total: ${movimientosTotal}`
+                : `Mostrando: ${filteredMovimientos.length}`}
             </span>
             {movimientosLoading && (
               <span className="text-xs text-[var(--muted)]">
                 Cargando movimientos...
+              </span>
+            )}
+            {movimientosLoadingMore && (
+              <span className="text-xs text-[var(--muted)]">
+                {searchText.trim()
+                  ? "Buscando en todo el histórico..."
+                  : "Cargando más movimientos..."}
               </span>
             )}
             {movimientosError && (
@@ -1406,6 +1498,26 @@ export default function MovimientosClient({
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            {movimientosHasMore && !searchText.trim() && (
+              <button
+                type="button"
+                onClick={loadMoreMovimientos}
+                disabled={movimientosLoadingMore}
+                className="cursor-pointer rounded-full border border-black/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10"
+              >
+                {movimientosLoadingMore
+                  ? "Cargando..."
+                  : `Cargar ${MOVIMIENTOS_PAGE_SIZE} más`}
+              </button>
+            )}
+            {searchText.trim() && movimientosHasMore && (
+              <p className="text-xs text-[var(--muted)]">
+                Buscando en todo el histórico...
+              </p>
+            )}
           </div>
         </section>
       </div>
