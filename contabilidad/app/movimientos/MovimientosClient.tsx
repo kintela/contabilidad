@@ -215,6 +215,9 @@ export default function MovimientosClient({
   const activeLibroId = showOnlyTable
     ? requestedLibroId ?? selectedLibroId
     : selectedLibroId;
+  const addMovimientoHref = activeLibroId
+    ? `/movimientos?libro=${encodeURIComponent(activeLibroId)}`
+    : "/movimientos";
 
   useEffect(() => {
     let isMounted = true;
@@ -1001,6 +1004,30 @@ export default function MovimientosClient({
                 Libro · {selectedLibro?.nombre ?? "Sin libro seleccionado"}
               </p>
             </div>
+            {showOnlyTable && (
+              <div className="flex items-center gap-2">
+                {activeLibroId ? (
+                  <Link
+                    href={addMovimientoHref}
+                    title="añadir movimiento"
+                    aria-label="Añadir movimiento"
+                    className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
+                  >
+                    +
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    title="añadir movimiento"
+                    aria-label="Añadir movimiento"
+                    disabled
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:border-black/20 disabled:text-black/30 dark:disabled:border-white/20 dark:disabled:text-white/30"
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </header>
 
