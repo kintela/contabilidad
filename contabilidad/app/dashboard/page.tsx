@@ -1475,6 +1475,9 @@ export default function DashboardPage() {
   const movimientosTableHref = selectedLibroId
     ? `/movimientos?libro=${encodeURIComponent(selectedLibroId)}&view=tabla#tabla-movimientos`
     : "/movimientos?view=tabla#tabla-movimientos";
+  const saldosHref = selectedLibroId
+    ? `/saldos?libro=${encodeURIComponent(selectedLibroId)}`
+    : "/saldos";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(1200px_circle_at_8%_-10%,rgba(15,118,110,0.2),transparent_60%),radial-gradient(900px_circle_at_110%_10%,rgba(251,146,60,0.2),transparent_55%)]">
@@ -1512,6 +1515,26 @@ export default function DashboardPage() {
                     {selectedLibroId ? (
                       <>
                         <Link
+                          href={saldosHref}
+                          title="Ver saldos"
+                          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-black/20 text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        >
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M3 6c0-1.66 4-3 9-3s9 1.34 9 3-4 3-9 3-9-1.34-9-3Z" />
+                            <path d="M3 6v5c0 1.66 4 3 9 3s9-1.34 9-3V6" />
+                            <path d="M3 11v5c0 1.66 4 3 9 3s9-1.34 9-3v-5" />
+                          </svg>
+                        </Link>
+                        <Link
                           href={movimientosTableHref}
                           title="Ver movimientos"
                           className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-black/20 text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
@@ -1540,6 +1563,27 @@ export default function DashboardPage() {
                       </>
                     ) : (
                       <>
+                        <button
+                          type="button"
+                          title="Ver saldos"
+                          disabled
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-black/20 text-[var(--muted)] transition disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M3 6c0-1.66 4-3 9-3s9 1.34 9 3-4 3-9 3-9-1.34-9-3Z" />
+                            <path d="M3 6v5c0 1.66 4 3 9 3s9-1.34 9-3V6" />
+                            <path d="M3 11v5c0 1.66 4 3 9 3s9-1.34 9-3v-5" />
+                          </svg>
+                        </button>
                         <button
                           type="button"
                           title="Ver movimientos"
