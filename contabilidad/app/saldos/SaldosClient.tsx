@@ -75,6 +75,10 @@ export default function SaldosClient({
   const [addSaldoLoading, setAddSaldoLoading] = useState(false);
   const [addSaldoError, setAddSaldoError] = useState<string | null>(null);
 
+  const [chartYear, setChartYear] = useState<string>(
+    String(CURRENT_YEAR)
+  );
+
   const [editingCell, setEditingCell] = useState<{
     id: string;
     field: EditableField;
@@ -241,12 +245,22 @@ export default function SaldosClient({
       month: "long",
     }).format(new Date(value));
 
+  const formatMonthShort = (value: string) =>
+    new Intl.DateTimeFormat("es-ES", {
+      year: "2-digit",
+      month: "short",
+    }).format(new Date(value));
+
   const addMesPreview = useMemo(() => {
     const month = String(addMonth).padStart(2, "0");
     return `${addYear}-${month}-01`;
   }, [addYear, addMonth]);
 
   const addYearOptions = useMemo(() => {
+    return [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2, CURRENT_YEAR - 3];
+  }, []);
+
+  const chartYearOptions = useMemo(() => {
     const set = new Set<number>();
     set.add(CURRENT_YEAR);
     saldos.forEach((saldo) => {
@@ -257,6 +271,99 @@ export default function SaldosClient({
     });
     return Array.from(set).sort((a, b) => b - a);
   }, [saldos]);
+
+  const chartRows = useMemo(() => {
+    return [...saldos]
+      .sort(
+        (a, b) => new Date(a.mes).getTime() - new Date(b.mes).getTime()
+      )
+      .map((row) => ({
+        id: row.id,
+        mes: row.mes,
+        label: formatMonthShort(row.mes),
+        value: Number(row.saldo ?? 0),
+      }));
+  }, [saldos]);
+
+  const chartRowsByMonth = useMemo(() => {
+    const map = new Map<string, number>();
+    chartRows.forEach((row) => {
+      map.set(row.mes.slice(0, 7), row.value);
+    });
+    return map;
+  }, [chartRows]);
+
+  const chartTimeline = useMemo(() => {
+    if (chartYear === "all") return chartRows;
+    const yearValue = Number(chartYear);
+    if (!Number.isFinite(yearValue)) return chartRows;
+    return Array.from({ length: 12 }, (_, index) => {
+      const month = String(index + 1).padStart(2, "0");
+      const mes = `${yearValue}-${month}-01`;
+      const key = `${yearValue}-${month}`;
+      const value = chartRowsByMonth.get(key);
+      return {
+        id: key,
+        mes,
+        label: formatMonthShort(mes),
+        value: value ?? null,
+      };
+    });
+  }, [chartYear, chartRows, chartRowsByMonth]);
+
+  const lineChart = useMemo(() => {
+    if (chartTimeline.length === 0) return null;
+    const width = Math.max(720, chartTimeline.length * 84);
+    const height = 260;
+    const padding = { top: 32, right: 72, bottom: 48, left: 76 };
+    const values = chartTimeline
+      .map((row) => row.value)
+      .filter((value): value is number => typeof value === "number");
+    if (values.length === 0) return null;
+    const maxValue = Math.max(0, ...values);
+    const minValue = Math.min(0, ...values);
+    const range = Math.max(1, maxValue - minValue);
+    const rangeX = width - padding.left - padding.right;
+    const rangeY = height - padding.top - padding.bottom;
+    const xStep =
+      chartTimeline.length > 1 ? rangeX / (chartTimeline.length - 1) : 0;
+    const points = chartTimeline.map((row, index) => {
+      const x =
+        chartTimeline.length > 1
+          ? padding.left + index * xStep
+          : padding.left + rangeX / 2;
+      if (typeof row.value !== "number") {
+        return { ...row, x, y: null };
+      }
+      const y = padding.top + ((maxValue - row.value) / range) * rangeY;
+      return { ...row, x, y };
+    });
+    let path = "";
+    let drawing = false;
+    points.forEach((point) => {
+      if (typeof point.y !== "number") {
+        drawing = false;
+        return;
+      }
+      path += `${drawing ? " L" : " M"} ${point.x} ${point.y}`;
+      drawing = true;
+    });
+    const zeroY = padding.top + ((maxValue - 0) / range) * rangeY;
+    const tickCount = 4;
+    const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
+      const ratio = index / tickCount;
+      const value = maxValue - ratio * (maxValue - minValue);
+      return {
+        value,
+        y: padding.top + ratio * rangeY,
+      };
+    });
+    return { width, height, padding, points, path, zeroY, ticks, rangeY };
+  }, [chartTimeline]);
+
+  const chartShouldScroll = useMemo(() => {
+    return chartYear === "all" && chartTimeline.length > 12;
+  }, [chartTimeline.length, chartYear]);
 
   const parseSaldoValue = (value: string) => {
     const trimmed = value.trim();
@@ -617,6 +724,178 @@ export default function SaldosClient({
               </button>
             </div>
           </form>
+        </section>
+
+        <section className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3
+                className="text-2xl font-semibold text-[var(--foreground)]"
+                style={{ fontFamily: "var(--font-fraunces)" }}
+              >
+                Evolución del saldo
+              </h3>
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                Eje X: fecha · Eje Y: importe
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                <span>Año</span>
+                <select
+                  className="rounded-full border border-black/10 bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                  value={chartYear}
+                  onChange={(event) => setChartYear(event.target.value)}
+                >
+                  <option value="all">Todos</option>
+                  {chartYearOptions.map((year) => (
+                    <option key={year} value={String(year)}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
+                {`Meses: ${chartTimeline.length}`}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            {!lineChart ? (
+              <div className="rounded-2xl border border-dashed border-black/10 px-4 py-6 text-center text-sm text-[var(--muted)] dark:border-white/10">
+                No hay saldos para mostrar en el gráfico.
+              </div>
+            ) : (
+              <div
+                className="overflow-x-auto pb-2"
+                style={{ scrollbarGutter: "stable" }}
+              >
+                <div
+                  className="relative"
+                  style={{
+                    minWidth: chartShouldScroll
+                      ? `${lineChart.width}px`
+                      : "100%",
+                  }}
+                >
+                  <svg
+                    width={chartShouldScroll ? lineChart.width : "100%"}
+                    height={lineChart.height}
+                    viewBox={`0 0 ${lineChart.width} ${lineChart.height}`}
+                    preserveAspectRatio="xMidYMid meet"
+                    className="block"
+                  >
+                    <g>
+                      {lineChart.ticks.map((tick, index) => (
+                        <g key={`${tick.value}-${index}`}>
+                          <line
+                            x1={lineChart.padding.left}
+                            x2={lineChart.width - lineChart.padding.right}
+                            y1={tick.y}
+                            y2={tick.y}
+                            stroke="currentColor"
+                            strokeWidth="1"
+                            className="text-black/10 dark:text-white/10"
+                          />
+                          <text
+                            x={lineChart.padding.left - 12}
+                            y={tick.y + 4}
+                            textAnchor="end"
+                            className="text-[10px] text-[var(--muted)]"
+                            fill="currentColor"
+                          >
+                            {formatCurrency(tick.value)}
+                          </text>
+                        </g>
+                      ))}
+                      <line
+                        x1={lineChart.padding.left}
+                        x2={lineChart.width - lineChart.padding.right}
+                        y1={lineChart.zeroY}
+                        y2={lineChart.zeroY}
+                        stroke="currentColor"
+                        strokeWidth="1"
+                        className="text-black/30 dark:text-white/20"
+                      />
+                    </g>
+                    <path
+                      d={lineChart.path}
+                      fill="none"
+                      stroke="var(--accent)"
+                      strokeWidth="2.5"
+                    />
+                    {lineChart.points.map((point, index) => {
+                      if (typeof point.y !== "number" || point.value === null) {
+                        return null;
+                      }
+                      const labelOffset = 12;
+                      const topLimit = lineChart.padding.top + 6;
+                      const bottomLimit =
+                        lineChart.height - lineChart.padding.bottom - 6;
+                      let labelY = point.y - labelOffset;
+                      if (labelY < topLimit) {
+                        labelY = point.y + labelOffset + 2;
+                      }
+                      if (labelY > bottomLimit) {
+                        labelY = point.y - labelOffset;
+                      }
+                      const isFirst = index === 0;
+                      const isLast = index === lineChart.points.length - 1;
+                      const textAnchor = isFirst
+                        ? "start"
+                        : isLast
+                          ? "end"
+                          : "middle";
+                      return (
+                        <g key={point.id}>
+                          <circle
+                            cx={point.x}
+                            cy={point.y}
+                            r="4"
+                            fill="var(--accent)"
+                          />
+                          <text
+                            x={point.x}
+                            y={labelY}
+                            textAnchor={textAnchor}
+                            className="text-[10px] font-semibold text-[var(--muted)]"
+                            fill="currentColor"
+                          >
+                            {formatCurrency(point.value)}
+                          </text>
+                          <title>{`${formatMonth(point.mes)} · ${formatCurrency(
+                            point.value
+                          )}`}</title>
+                        </g>
+                      );
+                    })}
+                    {lineChart.points.map((point, index) => {
+                      const isFirst = index === 0;
+                      const isLast = index === lineChart.points.length - 1;
+                      const textAnchor = isFirst
+                        ? "start"
+                        : isLast
+                          ? "end"
+                          : "middle";
+                      return (
+                        <text
+                          key={`${point.id}-label`}
+                          x={point.x}
+                          y={lineChart.height - 12}
+                          textAnchor={textAnchor}
+                          className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]"
+                          fill="currentColor"
+                        >
+                          {point.label}
+                        </text>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
         <section
