@@ -1553,13 +1553,6 @@ export default function DashboardPage() {
                             <circle cx="12" cy="12" r="3.5" />
                           </svg>
                         </Link>
-                        <Link
-                          href={movimientosHref}
-                          title="Añadir movimientos"
-                          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-white"
-                        >
-                          +
-                        </Link>
                       </>
                     ) : (
                       <>
@@ -1603,14 +1596,6 @@ export default function DashboardPage() {
                             <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
                             <circle cx="12" cy="12" r="3.5" />
                           </svg>
-                        </button>
-                        <button
-                          type="button"
-                          title="Añadir movimientos"
-                          disabled
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--accent)] text-lg font-semibold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:border-black/20 disabled:text-black/30 dark:disabled:border-white/20 dark:disabled:text-white/30"
-                        >
-                          +
                         </button>
                       </>
                     )}
