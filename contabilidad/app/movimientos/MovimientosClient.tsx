@@ -603,29 +603,6 @@ export default function MovimientosClient({
     return `${addYear}-${month}-${day}`;
   }, [addYear, addMonth, addDay]);
 
-  const filteredMovimientos = useMemo(() => {
-    const query = normalizeText(searchText.trim());
-    if (!query) return movimientos;
-    const dateFormatter = new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-    return movimientos.filter((mov) => {
-      const fijoLabel =
-        typeof mov.fijo === "boolean" ? (mov.fijo ? "fijo" : "variable") : "";
-      const parts = [
-        mov.fecha ?? "",
-        dateFormatter.format(new Date(mov.fecha)),
-        mov.categoria_nombre ?? "",
-        mov.detalle ?? "",
-        mov.tipo ?? "",
-        fijoLabel,
-      ];
-      return normalizeText(parts.join(" ")).includes(query);
-    });
-  }, [movimientos, searchText]);
-
   const parseImporteValue = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -638,6 +615,54 @@ export default function MovimientosClient({
     const amount = Number(normalized);
     return Number.isFinite(amount) ? amount : null;
   };
+
+  const filteredMovimientos = useMemo(() => {
+    const rawQuery = searchText.trim();
+    const query = normalizeText(rawQuery);
+    if (!query) return movimientos;
+    const queryHasLetters = /[a-z]/.test(query);
+    const queryNumber = queryHasLetters ? null : parseImporteValue(rawQuery);
+    const queryHasSign = /^[-+]/.test(rawQuery);
+    const dateFormatter = new Intl.DateTimeFormat("es-ES", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
+    return movimientos.filter((mov) => {
+      const fijoLabel =
+        typeof mov.fijo === "boolean" ? (mov.fijo ? "fijo" : "variable") : "";
+      const amountValue =
+        typeof mov.importe === "number" && Number.isFinite(mov.importe)
+          ? mov.importe
+          : null;
+      const kind = resolveKind(mov);
+      const normalizedAmount =
+        amountValue !== null
+          ? kind === "gasto"
+            ? -Math.abs(amountValue)
+            : Math.abs(amountValue)
+          : null;
+      const formattedAmount =
+        normalizedAmount !== null ? formatMovementAmount(mov) : "";
+      const parts = [
+        mov.fecha ?? "",
+        dateFormatter.format(new Date(mov.fecha)),
+        mov.categoria_nombre ?? "",
+        mov.detalle ?? "",
+        mov.tipo ?? "",
+        fijoLabel,
+        normalizedAmount !== null ? String(normalizedAmount) : "",
+        formattedAmount,
+      ];
+      const textMatch = normalizeText(parts.join(" ")).includes(query);
+      if (textMatch) return true;
+      if (queryNumber === null || normalizedAmount === null) return false;
+      const roundedAmount = Math.round(normalizedAmount * 100);
+      const roundedQuery = Math.round(queryNumber * 100);
+      if (queryHasSign) return roundedAmount === roundedQuery;
+      return Math.abs(roundedAmount) === Math.abs(roundedQuery);
+    });
+  }, [movimientos, searchText]);
 
   const parseDateInput = (value: string) => {
     const trimmed = value.trim();
