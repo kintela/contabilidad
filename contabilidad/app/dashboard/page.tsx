@@ -1469,9 +1469,6 @@ export default function DashboardPage() {
       }`
     : null;
 
-  const movimientosHref = selectedLibroId
-    ? `/movimientos?libro=${encodeURIComponent(selectedLibroId)}`
-    : "/movimientos";
   const movimientosTableHref = selectedLibroId
     ? `/movimientos?libro=${encodeURIComponent(selectedLibroId)}&view=tabla#tabla-movimientos`
     : "/movimientos?view=tabla#tabla-movimientos";

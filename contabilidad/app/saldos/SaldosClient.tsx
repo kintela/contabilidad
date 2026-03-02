@@ -32,6 +32,7 @@ type GastoMovimiento = {
   id: string;
   fecha: string;
   amount: number;
+  libro_id: string;
   detalle?: string | null;
   categoria_nombre?: string | null;
 };
@@ -338,11 +339,7 @@ export default function SaldosClient({
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    if (!selectedLibroId) {
-      setSaldos([]);
-      setSaldosError(null);
-      return;
-    }
+    if (!selectedLibroId) return;
 
     const loadSaldos = async () => {
       setSaldosLoading(true);
@@ -371,11 +368,7 @@ export default function SaldosClient({
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    if (!selectedLibroId) {
-      setGastoMovimientos([]);
-      setGastoMovimientosError(null);
-      return;
-    }
+    if (!selectedLibroId) return;
     if (categoriasLoading) return;
 
     let isMounted = true;
@@ -428,6 +421,7 @@ export default function SaldosClient({
             id: String(mov.id),
             fecha: mov.fecha,
             amount: Math.abs(amountValue),
+            libro_id: selectedLibroId,
             detalle: mov.detalle ?? null,
             categoria_nombre: categoria?.nombre ?? null,
           });
@@ -451,7 +445,21 @@ export default function SaldosClient({
 
   const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
-  const gastoErrorMessage = gastoMovimientosError ?? categoriasError;
+  const hasSelectedLibro = Boolean(selectedLibroId);
+  const visibleSaldos = useMemo(() => {
+    if (!selectedLibroId) return [];
+    return saldos.filter((saldo) => saldo.libro_id === selectedLibroId);
+  }, [saldos, selectedLibroId]);
+  const visibleSaldosError = hasSelectedLibro ? saldosError : null;
+  const visibleSaldosLoading = hasSelectedLibro ? saldosLoading : false;
+  const visibleGastoMovimientos = useMemo(() => {
+    if (!selectedLibroId) return [];
+    return gastoMovimientos.filter((mov) => mov.libro_id === selectedLibroId);
+  }, [gastoMovimientos, selectedLibroId]);
+  const visibleGastoLoading = hasSelectedLibro ? gastoMovimientosLoading : false;
+  const gastoErrorMessage = hasSelectedLibro
+    ? gastoMovimientosError ?? categoriasError
+    : null;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
@@ -484,17 +492,17 @@ export default function SaldosClient({
   const chartYearOptions = useMemo(() => {
     const set = new Set<number>();
     set.add(CURRENT_YEAR);
-    saldos.forEach((saldo) => {
+    visibleSaldos.forEach((saldo) => {
       const year = new Date(saldo.mes).getFullYear();
       if (!Number.isNaN(year)) {
         set.add(year);
       }
     });
     return Array.from(set).sort((a, b) => b - a);
-  }, [saldos]);
+  }, [visibleSaldos]);
 
   const chartRows = useMemo(() => {
-    return [...saldos]
+    return [...visibleSaldos]
       .sort(
         (a, b) => new Date(a.mes).getTime() - new Date(b.mes).getTime()
       )
@@ -504,7 +512,7 @@ export default function SaldosClient({
         label: formatMonthShort(row.mes),
         value: Number(row.saldo ?? 0),
       }));
-  }, [saldos]);
+  }, [visibleSaldos]);
 
   const chartRowsByMonth = useMemo(() => {
     const map = new Map<string, number>();
@@ -595,7 +603,7 @@ export default function SaldosClient({
       }
     >();
 
-    gastoMovimientos.forEach((mov) => {
+    visibleGastoMovimientos.forEach((mov) => {
       const monthKey = mov.fecha.slice(0, 7);
       if (!monthKey) return;
       const label =
@@ -623,7 +631,7 @@ export default function SaldosClient({
     });
 
     return output;
-  }, [gastoMovimientos]);
+  }, [visibleGastoMovimientos]);
 
   const gastoChart = useMemo(() => {
     if (!lineChart) return null;
@@ -1068,7 +1076,7 @@ export default function SaldosClient({
                       Menor
                     </span>
                   </div>
-                  {gastoMovimientosLoading && (
+                  {visibleGastoLoading && (
                     <span className="text-[10px]">Cargando gastos...</span>
                   )}
                   {gastoErrorMessage && (
@@ -1078,7 +1086,7 @@ export default function SaldosClient({
                   )}
                   {gastoChart &&
                     gastoChart.maxTotal === 0 &&
-                    !gastoMovimientosLoading &&
+                    !visibleGastoLoading &&
                     !gastoErrorMessage &&
                     !categoriasLoading && (
                       <span className="text-[10px] normal-case tracking-normal text-[var(--muted)]">
@@ -1302,16 +1310,16 @@ export default function SaldosClient({
               </p>
             </div>
             <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
-              {`Mostrando: ${saldos.length}`}
+              {`Mostrando: ${visibleSaldos.length}`}
             </span>
-            {saldosLoading && (
+            {visibleSaldosLoading && (
               <span className="text-xs text-[var(--muted)]">
                 Cargando saldos...
               </span>
             )}
-            {saldosError && (
+            {visibleSaldosError && (
               <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
-                {saldosError}
+                {visibleSaldosError}
               </span>
             )}
             {editError && (
@@ -1330,7 +1338,7 @@ export default function SaldosClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5 text-[var(--foreground)] dark:divide-white/10">
-                {saldos.length === 0 ? (
+                {visibleSaldos.length === 0 ? (
                   <tr>
                     <td
                       colSpan={2}
@@ -1340,7 +1348,7 @@ export default function SaldosClient({
                     </td>
                   </tr>
                 ) : (
-                  saldos.map((saldo) => (
+                  visibleSaldos.map((saldo) => (
                     <tr key={saldo.id} className="hover:bg-black/5">
                       <td
                         className="px-3 py-2 whitespace-nowrap cursor-pointer"

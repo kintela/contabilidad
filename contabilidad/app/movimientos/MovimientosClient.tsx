@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
@@ -482,7 +482,7 @@ export default function MovimientosClient({
     loadMovimientos();
   }, [activeLibroId, categorias, refreshToken]);
 
-  const loadMoreMovimientos = async () => {
+  const loadMoreMovimientos = useCallback(async () => {
     if (!activeLibroId || movimientosLoadingMore || !movimientosHasMore) {
       return;
     }
@@ -531,13 +531,23 @@ export default function MovimientosClient({
         : (data?.length ?? 0) >= MOVIMIENTOS_PAGE_SIZE;
     setMovimientosHasMore(hasMore);
     setMovimientosLoadingMore(false);
-  };
+  }, [
+    activeLibroId,
+    categorias,
+    movimientosHasMore,
+    movimientosLoadingMore,
+    movimientosPage,
+    movimientosTotal,
+  ]);
 
   useEffect(() => {
     if (!searchText.trim()) return;
     if (movimientosLoading || movimientosLoadingMore) return;
     if (!movimientosHasMore) return;
-    void loadMoreMovimientos();
+    const timeout = setTimeout(() => {
+      void loadMoreMovimientos();
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [
     searchText,
     movimientosHasMore,
@@ -616,7 +626,7 @@ export default function MovimientosClient({
     return Number.isFinite(amount) ? amount : null;
   };
 
-  const filteredMovimientos = useMemo(() => {
+  const filteredMovimientos = (() => {
     const rawQuery = searchText.trim();
     const query = normalizeText(rawQuery);
     if (!query) return movimientos;
@@ -662,7 +672,7 @@ export default function MovimientosClient({
       if (queryHasSign) return roundedAmount === roundedQuery;
       return Math.abs(roundedAmount) === Math.abs(roundedQuery);
     });
-  }, [movimientos, searchText]);
+  })();
 
   const parseDateInput = (value: string) => {
     const trimmed = value.trim();
