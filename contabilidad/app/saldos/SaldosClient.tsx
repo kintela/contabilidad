@@ -735,9 +735,6 @@ export default function SaldosClient({
               >
                 Evolución del saldo
               </h3>
-              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
-                Eje X: fecha · Eje Y: importe
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
