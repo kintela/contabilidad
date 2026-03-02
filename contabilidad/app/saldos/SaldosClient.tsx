@@ -22,8 +22,24 @@ type Saldo = {
 
 type EditableField = "mes" | "saldo";
 
+type Categoria = {
+  id: string;
+  nombre: string | null;
+  kind: "ingreso" | "gasto" | null;
+};
+
+type GastoMovimiento = {
+  id: string;
+  fecha: string;
+  amount: number;
+  detalle?: string | null;
+  categoria_nombre?: string | null;
+};
+
 const CURRENT_YEAR = new Date().getFullYear();
 const CURRENT_MONTH = new Date().getMonth() + 1;
+const MOVIMIENTOS_GASTOS_PAGE_SIZE = 1000;
+const TOP_GASTOS_PER_MONTH = 3;
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => {
   const formatter = new Intl.DateTimeFormat("es-ES", { month: "long" });
   const label = formatter.format(new Date(2020, index, 1));
@@ -41,6 +57,84 @@ const sortSaldos = (rows: Saldo[]) =>
     const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
     return createdB - createdA;
   });
+
+const normalizeKindLabel = (value?: string | null) => {
+  const tipo = (value ?? "").toLowerCase().trim();
+  if (!tipo) return null;
+  if (
+    tipo.includes("ingres") ||
+    tipo.includes("income") ||
+    tipo.includes("entrada") ||
+    tipo.includes("abono")
+  ) {
+    return "ingreso" as const;
+  }
+  if (
+    tipo.includes("gast") ||
+    tipo.includes("expense") ||
+    tipo.includes("salida") ||
+    tipo.includes("cargo")
+  ) {
+    return "gasto" as const;
+  }
+  if (tipo === "i") return "ingreso" as const;
+  if (tipo === "g") return "gasto" as const;
+  return null;
+};
+
+const resolveCategoryKind = (categoria: Record<string, unknown>) => {
+  const tipo = typeof categoria.tipo === "string" ? categoria.tipo : null;
+  const kindFromTipo = normalizeKindLabel(tipo);
+  if (kindFromTipo) return kindFromTipo;
+  for (const [key, value] of Object.entries(categoria)) {
+    if (typeof value !== "string") continue;
+    const keyLower = key.toLowerCase();
+    if (
+      keyLower.includes("tipo") ||
+      keyLower.includes("kind") ||
+      keyLower.includes("mov")
+    ) {
+      const kind = normalizeKindLabel(value);
+      if (kind) return kind;
+    }
+  }
+  const esGasto =
+    typeof categoria.es_gasto === "boolean"
+      ? categoria.es_gasto
+      : typeof categoria.esGasto === "boolean"
+        ? categoria.esGasto
+        : typeof categoria.gasto === "boolean"
+          ? categoria.gasto
+          : null;
+  if (typeof esGasto === "boolean") return esGasto ? "gasto" : "ingreso";
+  const esIngreso =
+    typeof categoria.es_ingreso === "boolean"
+      ? categoria.es_ingreso
+      : typeof categoria.esIngreso === "boolean"
+        ? categoria.esIngreso
+        : typeof categoria.ingreso === "boolean"
+          ? categoria.ingreso
+          : null;
+  if (typeof esIngreso === "boolean") return esIngreso ? "ingreso" : "gasto";
+  for (const [key, value] of Object.entries(categoria)) {
+    if (typeof value !== "boolean") continue;
+    const keyLower = key.toLowerCase();
+    if (keyLower.includes("gasto")) return value ? "gasto" : "ingreso";
+    if (keyLower.includes("ingreso")) return value ? "ingreso" : "gasto";
+  }
+  return null;
+};
+
+const resolveKind = (mov: {
+  tipo?: string | null;
+  categoria_kind?: string | null;
+}) => {
+  const tipoKind = normalizeKindLabel(mov.tipo);
+  if (tipoKind) return tipoKind;
+  const categoryKind = normalizeKindLabel(mov.categoria_kind);
+  if (categoryKind) return categoryKind;
+  return null;
+};
 
 type SaldosClientProps = {
   initialLibroId?: string | null;
@@ -65,9 +159,22 @@ export default function SaldosClient({
     initialLibroId ?? null
   );
 
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [categoriasLoading, setCategoriasLoading] = useState(false);
+  const [categoriasError, setCategoriasError] = useState<string | null>(null);
+
   const [saldos, setSaldos] = useState<Saldo[]>([]);
   const [saldosLoading, setSaldosLoading] = useState(false);
   const [saldosError, setSaldosError] = useState<string | null>(null);
+
+  const [gastoMovimientos, setGastoMovimientos] = useState<GastoMovimiento[]>(
+    []
+  );
+  const [gastoMovimientosLoading, setGastoMovimientosLoading] =
+    useState(false);
+  const [gastoMovimientosError, setGastoMovimientosError] = useState<
+    string | null
+  >(null);
 
   const [addYear, setAddYear] = useState<number>(CURRENT_YEAR);
   const [addMonth, setAddMonth] = useState<number>(CURRENT_MONTH);
@@ -198,6 +305,40 @@ export default function SaldosClient({
 
   useEffect(() => {
     if (!session?.user?.id) return;
+
+    const loadCategorias = async () => {
+      setCategoriasLoading(true);
+      setCategoriasError(null);
+
+      const { data, error } = await supabase.from("categorias").select("*");
+
+      if (error) {
+        setCategoriasError(error.message);
+        setCategorias([]);
+        setCategoriasLoading(false);
+        return;
+      }
+
+      const mapped = (data ?? []).map((categoria) => ({
+        id: String(categoria.id),
+        nombre:
+          typeof categoria.nombre === "string" ? categoria.nombre : "Sin nombre",
+        kind: resolveCategoryKind(categoria as Record<string, unknown>),
+      }));
+
+      const ordered = mapped.sort((a, b) =>
+        (a.nombre ?? "").localeCompare(b.nombre ?? "", "es-ES")
+      );
+
+      setCategorias(ordered);
+      setCategoriasLoading(false);
+    };
+
+    loadCategorias();
+  }, [session]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
     if (!selectedLibroId) {
       setSaldos([]);
       setSaldosError(null);
@@ -229,8 +370,89 @@ export default function SaldosClient({
     loadSaldos();
   }, [session, selectedLibroId]);
 
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    if (!selectedLibroId) {
+      setGastoMovimientos([]);
+      setGastoMovimientosError(null);
+      return;
+    }
+    if (categoriasLoading) return;
+
+    let isMounted = true;
+
+    const loadGastoMovimientos = async () => {
+      setGastoMovimientosLoading(true);
+      setGastoMovimientosError(null);
+
+      const categoriaMap = new Map(
+        categorias.map((categoria) => [categoria.id, categoria])
+      );
+
+      const allRows: GastoMovimiento[] = [];
+      let from = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("movimientos")
+          .select("id, fecha, tipo, importe, detalle, categoria_id, creado_en")
+          .eq("libro_id", selectedLibroId)
+          .order("fecha", { ascending: false })
+          .order("creado_en", { ascending: false })
+          .range(from, from + MOVIMIENTOS_GASTOS_PAGE_SIZE - 1);
+
+        if (error) {
+          if (!isMounted) return;
+          setGastoMovimientosError(error.message);
+          setGastoMovimientos([]);
+          setGastoMovimientosLoading(false);
+          return;
+        }
+
+        if (!data || data.length === 0) break;
+
+        data.forEach((mov) => {
+          const amountValue = Number(mov.importe ?? 0);
+          if (!Number.isFinite(amountValue) || amountValue === 0) return;
+
+          const categoria = mov.categoria_id
+            ? categoriaMap.get(mov.categoria_id)
+            : null;
+          const kind = resolveKind({
+            tipo: mov.tipo,
+            categoria_kind: categoria?.kind ?? null,
+          });
+
+          if (kind !== "gasto") return;
+
+          allRows.push({
+            id: String(mov.id),
+            fecha: mov.fecha,
+            amount: Math.abs(amountValue),
+            detalle: mov.detalle ?? null,
+            categoria_nombre: categoria?.nombre ?? null,
+          });
+        });
+
+        if (data.length < MOVIMIENTOS_GASTOS_PAGE_SIZE) break;
+        from += MOVIMIENTOS_GASTOS_PAGE_SIZE;
+      }
+
+      if (!isMounted) return;
+      setGastoMovimientos(allRows);
+      setGastoMovimientosLoading(false);
+    };
+
+    loadGastoMovimientos();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session, selectedLibroId, categorias, categoriasLoading]);
+
   const selectedLibro = libros.find((libro) => libro.id === selectedLibroId);
   const currency = selectedLibro?.moneda ?? "EUR";
+  const gastoErrorMessage = gastoMovimientosError ?? categoriasError;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
@@ -364,6 +586,81 @@ export default function SaldosClient({
   const chartShouldScroll = useMemo(() => {
     return chartYear === "all" && chartTimeline.length > 12;
   }, [chartTimeline.length, chartYear]);
+
+  const gastosByMonth = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        total: number;
+        items: { id: string; amount: number; label: string }[];
+      }
+    >();
+
+    gastoMovimientos.forEach((mov) => {
+      const monthKey = mov.fecha.slice(0, 7);
+      if (!monthKey) return;
+      const label =
+        mov.detalle?.trim() || mov.categoria_nombre?.trim() || "Gasto";
+      const entry = map.get(monthKey) ?? { total: 0, items: [] };
+      entry.total += mov.amount;
+      entry.items.push({ id: mov.id, amount: mov.amount, label });
+      map.set(monthKey, entry);
+    });
+
+    const output = new Map<
+      string,
+      {
+        total: number;
+        top: { id: string; amount: number; label: string }[];
+        remainder: number;
+      }
+    >();
+
+    map.forEach((entry, key) => {
+      const sorted = [...entry.items].sort((a, b) => b.amount - a.amount);
+      const top = sorted.slice(0, TOP_GASTOS_PER_MONTH);
+      const topTotal = top.reduce((sum, item) => sum + item.amount, 0);
+      output.set(key, {
+        total: entry.total,
+        top,
+        remainder: Math.max(entry.total - topTotal, 0),
+      });
+    });
+
+    return output;
+  }, [gastoMovimientos]);
+
+  const gastoChart = useMemo(() => {
+    if (!lineChart) return null;
+    const xStep =
+      lineChart.points.length > 1
+        ? lineChart.points[1].x - lineChart.points[0].x
+        : 0;
+    const barWidth =
+      lineChart.points.length > 1
+        ? Math.max(6, Math.min(22, xStep * 0.55))
+        : 22;
+    const barAreaHeight = Math.max(
+      32,
+      Math.min(80, lineChart.rangeY * 0.35)
+    );
+    const baseY = lineChart.height - lineChart.padding.bottom - 2;
+    const bars = lineChart.points.map((point) => {
+      const monthKey = point.mes.slice(0, 7);
+      const summary = gastosByMonth.get(monthKey);
+      return {
+        id: point.id,
+        mes: point.mes,
+        label: point.label,
+        x: point.x,
+        total: summary?.total ?? 0,
+        top: summary?.top ?? [],
+        remainder: summary?.remainder ?? 0,
+      };
+    });
+    const maxTotal = Math.max(0, ...bars.map((bar) => bar.total));
+    return { barWidth, barAreaHeight, baseY, bars, maxTotal };
+  }, [lineChart, gastosByMonth]);
 
   const parseSaldoValue = (value: string) => {
     const trimmed = value.trim();
@@ -764,18 +1061,49 @@ export default function SaldosClient({
                 No hay saldos para mostrar en el gráfico.
               </div>
             ) : (
-              <div
-                className="overflow-x-auto pb-2"
-                style={{ scrollbarGutter: "stable" }}
-              >
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span>Gastos del mes</span>
+                    <span className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-sm bg-black/20 dark:bg-white/20" />
+                      Total
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-sm bg-[var(--accent)]" />
+                      {`Top ${TOP_GASTOS_PER_MONTH}`}
+                    </span>
+                  </div>
+                  {gastoMovimientosLoading && (
+                    <span className="text-[10px]">Cargando gastos...</span>
+                  )}
+                  {gastoErrorMessage && (
+                    <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] text-red-700 normal-case tracking-normal dark:text-red-300">
+                      {gastoErrorMessage}
+                    </span>
+                  )}
+                  {gastoChart &&
+                    gastoChart.maxTotal === 0 &&
+                    !gastoMovimientosLoading &&
+                    !gastoErrorMessage &&
+                    !categoriasLoading && (
+                      <span className="text-[10px] normal-case tracking-normal text-[var(--muted)]">
+                        No hay gastos para estos meses.
+                      </span>
+                    )}
+                </div>
                 <div
-                  className="relative"
-                  style={{
-                    minWidth: chartShouldScroll
-                      ? `${lineChart.width}px`
-                      : "100%",
-                  }}
+                  className="overflow-x-auto pb-2"
+                  style={{ scrollbarGutter: "stable" }}
                 >
+                  <div
+                    className="relative"
+                    style={{
+                      minWidth: chartShouldScroll
+                        ? `${lineChart.width}px`
+                        : "100%",
+                    }}
+                  >
                   <svg
                     width={chartShouldScroll ? lineChart.width : "100%"}
                     height={lineChart.height}
@@ -806,6 +1134,71 @@ export default function SaldosClient({
                           </text>
                         </g>
                       ))}
+                      {gastoChart && gastoChart.maxTotal > 0 && (
+                        <g>
+                          {gastoChart.bars.map((bar) => {
+                            if (bar.total <= 0 || gastoChart.maxTotal <= 0) {
+                              return null;
+                            }
+                            const barHeight =
+                              (bar.total / gastoChart.maxTotal) *
+                              gastoChart.barAreaHeight;
+                            if (barHeight <= 0) return null;
+                            const baseY = gastoChart.baseY;
+                            const x = bar.x - gastoChart.barWidth / 2;
+                            const titleLines = [
+                              `${formatMonth(bar.mes)} · Total gastos: ${formatCurrency(
+                                bar.total
+                              )}`,
+                              ...bar.top.map(
+                                (item) =>
+                                  `${item.label}: ${formatCurrency(
+                                    item.amount
+                                  )}`
+                              ),
+                            ];
+                            let currentY = baseY;
+                            const segments = bar.top.map((item, index) => {
+                              const segmentHeight =
+                                (item.amount / bar.total) * barHeight;
+                              if (segmentHeight <= 0) return null;
+                              currentY -= segmentHeight;
+                              const opacity =
+                                index === 0
+                                  ? 0.9
+                                  : index === 1
+                                    ? 0.65
+                                    : 0.45;
+                              return (
+                                <rect
+                                  key={`${bar.id}-${item.id}`}
+                                  x={x}
+                                  y={currentY}
+                                  width={gastoChart.barWidth}
+                                  height={segmentHeight}
+                                  fill="var(--accent)"
+                                  opacity={opacity}
+                                />
+                              );
+                            });
+                            return (
+                              <g key={`gasto-${bar.id}`}>
+                                <rect
+                                  x={x}
+                                  y={baseY - barHeight}
+                                  width={gastoChart.barWidth}
+                                  height={barHeight}
+                                  rx="3"
+                                  fill="currentColor"
+                                  className="text-black/15 dark:text-white/15"
+                                />
+                                {segments}
+                                <title>{titleLines.join("\n")}</title>
+                              </g>
+                            );
+                          })}
+                        </g>
+                      )}
                       <line
                         x1={lineChart.padding.left}
                         x2={lineChart.width - lineChart.padding.right}
@@ -889,6 +1282,7 @@ export default function SaldosClient({
                       );
                     })}
                   </svg>
+                  </div>
                 </div>
               </div>
             )}
