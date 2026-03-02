@@ -39,7 +39,6 @@ type GastoMovimiento = {
 const CURRENT_YEAR = new Date().getFullYear();
 const CURRENT_MONTH = new Date().getMonth() + 1;
 const MOVIMIENTOS_GASTOS_PAGE_SIZE = 1000;
-const TOP_GASTOS_PER_MONTH = 3;
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => {
   const formatter = new Intl.DateTimeFormat("es-ES", { month: "long" });
   const label = formatter.format(new Date(2020, index, 1));
@@ -611,19 +610,15 @@ export default function SaldosClient({
       string,
       {
         total: number;
-        top: { id: string; amount: number; label: string }[];
-        remainder: number;
+        items: { id: string; amount: number; label: string }[];
       }
     >();
 
     map.forEach((entry, key) => {
       const sorted = [...entry.items].sort((a, b) => b.amount - a.amount);
-      const top = sorted.slice(0, TOP_GASTOS_PER_MONTH);
-      const topTotal = top.reduce((sum, item) => sum + item.amount, 0);
       output.set(key, {
         total: entry.total,
-        top,
-        remainder: Math.max(entry.total - topTotal, 0),
+        items: sorted,
       });
     });
 
@@ -654,8 +649,7 @@ export default function SaldosClient({
         label: point.label,
         x: point.x,
         total: summary?.total ?? 0,
-        top: summary?.top ?? [],
-        remainder: summary?.remainder ?? 0,
+        items: summary?.items ?? [],
       };
     });
     const maxTotal = Math.max(0, ...bars.map((bar) => bar.total));
@@ -1066,12 +1060,12 @@ export default function SaldosClient({
                   <div className="flex flex-wrap items-center gap-3">
                     <span>Gastos del mes</span>
                     <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-sm bg-black/20 dark:bg-white/20" />
-                      Total
+                      <span className="h-2 w-2 rounded-sm bg-[var(--accent)] opacity-90" />
+                      Mayor
                     </span>
                     <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-sm bg-[var(--accent)]" />
-                      {`Top ${TOP_GASTOS_PER_MONTH}`}
+                      <span className="h-2 w-2 rounded-sm bg-[var(--accent)] opacity-30" />
+                      Menor
                     </span>
                   </div>
                   {gastoMovimientosLoading && (
@@ -1146,29 +1140,40 @@ export default function SaldosClient({
                             if (barHeight <= 0) return null;
                             const baseY = gastoChart.baseY;
                             const x = bar.x - gastoChart.barWidth / 2;
+                            const maxTooltipItems = 12;
                             const titleLines = [
                               `${formatMonth(bar.mes)} · Total gastos: ${formatCurrency(
                                 bar.total
                               )}`,
-                              ...bar.top.map(
-                                (item) =>
-                                  `${item.label}: ${formatCurrency(
-                                    item.amount
-                                  )}`
-                              ),
+                              ...bar.items
+                                .slice(0, maxTooltipItems)
+                                .map(
+                                  (item) =>
+                                    `${item.label}: ${formatCurrency(
+                                      item.amount
+                                    )}`
+                                ),
                             ];
+                            if (bar.items.length > maxTooltipItems) {
+                              titleLines.push(
+                                `+${bar.items.length - maxTooltipItems} más`
+                              );
+                            }
                             let currentY = baseY;
-                            const segments = bar.top.map((item, index) => {
-                              const segmentHeight =
+                            const segments = bar.items.map((item, index) => {
+                              const isLast = index === bar.items.length - 1;
+                              const proportionalHeight =
                                 (item.amount / bar.total) * barHeight;
+                              const segmentHeight = isLast
+                                ? Math.max(0, currentY - (baseY - barHeight))
+                                : proportionalHeight;
                               if (segmentHeight <= 0) return null;
                               currentY -= segmentHeight;
-                              const opacity =
-                                index === 0
-                                  ? 0.9
-                                  : index === 1
-                                    ? 0.65
-                                    : 0.45;
+                              const ratio =
+                                bar.items.length > 1
+                                  ? index / (bar.items.length - 1)
+                                  : 0;
+                              const opacity = 0.9 - ratio * 0.6;
                               return (
                                 <rect
                                   key={`${bar.id}-${item.id}`}
@@ -1183,15 +1188,6 @@ export default function SaldosClient({
                             });
                             return (
                               <g key={`gasto-${bar.id}`}>
-                                <rect
-                                  x={x}
-                                  y={baseY - barHeight}
-                                  width={gastoChart.barWidth}
-                                  height={barHeight}
-                                  rx="3"
-                                  fill="currentColor"
-                                  className="text-black/15 dark:text-white/15"
-                                />
                                 {segments}
                                 <title>{titleLines.join("\n")}</title>
                               </g>
