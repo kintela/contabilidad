@@ -39,6 +39,8 @@ type Categoria = {
   kind: "ingreso" | "gasto" | null;
 };
 
+type YearFilter = "all" | number;
+
 const CURRENT_YEAR = new Date().getFullYear();
 const CURRENT_MONTH = new Date().getMonth() + 1;
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => {
@@ -146,6 +148,27 @@ const sortMovimientos = (rows: Movimiento[]) =>
     return createdB - createdA;
   });
 
+const parseRequestedYear = (value: string | null): YearFilter => {
+  if (!value) return "all";
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1900 || parsed > 9999) {
+    return "all";
+  }
+  return parsed;
+};
+
+const getMovementYear = (fecha: string) => {
+  const rawYear = Number(fecha.slice(0, 4));
+  if (Number.isFinite(rawYear)) return rawYear;
+  const parsedYear = new Date(fecha).getFullYear();
+  return Number.isFinite(parsedYear) ? parsedYear : null;
+};
+
+const movementMatchesYear = (fecha: string, year: YearFilter) => {
+  if (year === "all") return true;
+  return getMovementYear(fecha) === year;
+};
+
 type MovimientosClientProps = {
   initialLibroId?: string | null;
   onlyTable?: boolean;
@@ -159,6 +182,7 @@ export default function MovimientosClient({
   const searchParams = useSearchParams();
   const queryLibroId = searchParams.get("libro");
   const queryView = searchParams.get("view");
+  const requestedYear = parseRequestedYear(searchParams.get("year"));
   const showOnlyTable = onlyTable || queryView === "tabla";
   const requestedLibroId = queryLibroId ?? initialLibroId;
 
@@ -178,6 +202,7 @@ export default function MovimientosClient({
   const [categoriasError, setCategoriasError] = useState<string | null>(null);
 
   const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [selectedYear, setSelectedYear] = useState<YearFilter>(requestedYear);
   const [addYear, setAddYear] = useState<number>(CURRENT_YEAR);
   const [addMonth, setAddMonth] = useState<number>(CURRENT_MONTH);
   const [addDay, setAddDay] = useState("");
@@ -215,9 +240,25 @@ export default function MovimientosClient({
   const activeLibroId = showOnlyTable
     ? requestedLibroId ?? selectedLibroId
     : selectedLibroId;
+  const selectedYearRange = useMemo(
+    () =>
+      selectedYear === "all"
+        ? null
+        : {
+            from: `${selectedYear}-01-01`,
+            to: `${selectedYear + 1}-01-01`,
+          },
+    [selectedYear]
+  );
   const addMovimientoHref = activeLibroId
-    ? `/movimientos?libro=${encodeURIComponent(activeLibroId)}`
+    ? `/movimientos?libro=${encodeURIComponent(activeLibroId)}${
+        selectedYear === "all" ? "" : `&year=${selectedYear}`
+      }`
     : "/movimientos";
+
+  useEffect(() => {
+    setSelectedYear(requestedYear);
+  }, [requestedYear]);
 
   useEffect(() => {
     let isMounted = true;
@@ -436,13 +477,21 @@ export default function MovimientosClient({
       setMovimientosHasMore(false);
       setMovimientosTotal(null);
 
-      const { data, error, count } = await supabase
+      let query = supabase
         .from("movimientos")
         .select(
           "id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en",
           { count: "exact" }
         )
-        .eq("libro_id", activeLibroId)
+        .eq("libro_id", activeLibroId);
+
+      if (selectedYearRange) {
+        query = query
+          .gte("fecha", selectedYearRange.from)
+          .lt("fecha", selectedYearRange.to);
+      }
+
+      const { data, error, count } = await query
         .order("fecha", { ascending: false })
         .order("creado_en", { ascending: false })
         .range(0, MOVIMIENTOS_PAGE_SIZE - 1);
@@ -480,7 +529,7 @@ export default function MovimientosClient({
     };
 
     loadMovimientos();
-  }, [activeLibroId, categorias, refreshToken]);
+  }, [activeLibroId, categorias, refreshToken, selectedYearRange]);
 
   const loadMoreMovimientos = useCallback(async () => {
     if (!activeLibroId || movimientosLoadingMore || !movimientosHasMore) {
@@ -493,10 +542,18 @@ export default function MovimientosClient({
     const from = movimientosPage * MOVIMIENTOS_PAGE_SIZE;
     const to = from + MOVIMIENTOS_PAGE_SIZE - 1;
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("movimientos")
       .select("id, fecha, tipo, importe, detalle, fijo, categoria_id, creado_en")
-      .eq("libro_id", activeLibroId)
+      .eq("libro_id", activeLibroId);
+
+    if (selectedYearRange) {
+      query = query
+        .gte("fecha", selectedYearRange.from)
+        .lt("fecha", selectedYearRange.to);
+    }
+
+    const { data, error } = await query
       .order("fecha", { ascending: false })
       .order("creado_en", { ascending: false })
       .range(from, to);
@@ -538,6 +595,7 @@ export default function MovimientosClient({
     movimientosLoadingMore,
     movimientosPage,
     movimientosTotal,
+    selectedYearRange,
   ]);
 
   useEffect(() => {
@@ -562,6 +620,15 @@ export default function MovimientosClient({
     return Array.from(set).sort((a, b) => b - a);
   }, [availableYears]);
 
+  const yearFilterOptions = useMemo(() => {
+    const set = new Set<number>(availableYears);
+    set.add(CURRENT_YEAR);
+    if (typeof selectedYear === "number") {
+      set.add(selectedYear);
+    }
+    return Array.from(set).sort((a, b) => b - a);
+  }, [availableYears, selectedYear]);
+
   const detailOptions = useMemo(() => {
     const set = new Set<string>();
     movimientos.forEach((mov) => {
@@ -573,7 +640,11 @@ export default function MovimientosClient({
   }, [movimientos]);
 
   const selectedLibro = libros.find((libro) => libro.id === activeLibroId);
+  const selectedLibroName = selectedLibro?.nombre ?? "Sin libro seleccionado";
   const currency = selectedLibro?.moneda ?? "EUR";
+  const yearSummaryLabel =
+    selectedYear === "all" ? "Todo el histórico" : String(selectedYear);
+  const totalsLabel = selectedYear === "all" ? "Total" : `Total ${selectedYear}`;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es-ES", {
@@ -835,14 +906,25 @@ export default function MovimientosClient({
       categoria_kind: categoriaLookup?.kind ?? null,
     };
 
-    setMovimientos((prev) =>
-      sortMovimientos(
-        prev.map((mov) => (mov.id === target.id ? enriched : mov))
-      )
-    );
+    if (!movementMatchesYear(enriched.fecha, selectedYear)) {
+      setMovimientos((prev) => prev.filter((mov) => mov.id !== target.id));
+      setMovimientosTotal((prev) =>
+        typeof prev === "number" ? Math.max(prev - 1, 0) : prev
+      );
+    } else {
+      setMovimientos((prev) =>
+        sortMovimientos(
+          prev.map((mov) => (mov.id === target.id ? enriched : mov))
+        )
+      );
+    }
 
     setEditSaving(false);
     cancelEdit();
+
+    if (editingCell.field === "fecha") {
+      setRefreshToken((prev) => prev + 1);
+    }
   };
 
   const handleEditKeyDown = (
@@ -896,6 +978,7 @@ export default function MovimientosClient({
     );
     setDeleteLoadingId(null);
     setDeleteCandidate(null);
+    setRefreshToken((prev) => prev + 1);
   };
 
   const resetAddMovimientoForm = () => {
@@ -972,10 +1055,12 @@ export default function MovimientosClient({
       categoria_kind: categoriaLookup?.kind ?? null,
     };
 
-    setMovimientos((prev) => sortMovimientos([enriched, ...prev]));
-    setMovimientosTotal((prev) =>
-      typeof prev === "number" ? prev + 1 : prev
-    );
+    if (movementMatchesYear(enriched.fecha, selectedYear)) {
+      setMovimientos((prev) => sortMovimientos([enriched, ...prev]));
+      setMovimientosTotal((prev) =>
+        typeof prev === "number" ? prev + 1 : prev
+      );
+    }
 
     setAddMovimientoLoading(false);
     resetAddMovimientoForm();
@@ -1025,7 +1110,7 @@ export default function MovimientosClient({
             </Link>
           </div>
           <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
+            <div className="max-w-3xl">
               <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
                 Movimientos
               </p>
@@ -1035,9 +1120,38 @@ export default function MovimientosClient({
               >
                 {showOnlyTable ? "Movimientos del libro" : "Añadir movimientos"}
               </h1>
-              <p className="mt-2 text-sm text-[var(--muted)]">
-                Libro · {selectedLibro?.nombre ?? "Sin libro seleccionado"}
-              </p>
+              <div className="mt-4 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/25 bg-[linear-gradient(135deg,rgba(15,118,110,0.16),rgba(251,146,60,0.08))] px-4 py-3 shadow-[0_18px_40px_rgba(15,118,110,0.14)]">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--surface)]/85 text-[var(--accent)] shadow-sm dark:bg-black/30">
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v15.5A2.5 2.5 0 0 0 17.5 17H4z" />
+                    <path d="M6.5 4v13" />
+                    <path d="M8.5 8H16" />
+                    <path d="M8.5 12H14" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--accent)]">
+                    Libro activo
+                  </p>
+                  <p className="truncate text-lg font-semibold text-[var(--foreground)]">
+                    {selectedLibroName}
+                  </p>
+                  <p className="text-xs text-[var(--muted)]">
+                    {selectedYear === "all"
+                      ? "Mostrando todo el histórico"
+                      : `Mostrando el año ${selectedYear}`}
+                  </p>
+                </div>
+              </div>
             </div>
             {showOnlyTable && (
               <div className="flex items-center gap-2">
@@ -1294,8 +1408,8 @@ export default function MovimientosClient({
           id="tabla-movimientos"
           className="rounded-3xl border border-black/10 bg-[var(--surface)] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] dark:border-white/10"
         >
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
               <h3
                 className="text-2xl font-semibold text-[var(--foreground)]"
                 style={{ fontFamily: "var(--font-fraunces)" }}
@@ -1303,48 +1417,87 @@ export default function MovimientosClient({
                 Movimientos del libro
               </h3>
               <p className="mt-1 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
-                Ordenados por fecha · {selectedLibro?.nombre ?? "Sin libro"}
+                Ordenados por fecha · {yearSummaryLabel}
               </p>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                <span>Libro consultado</span>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold tracking-[0.2em] text-emerald-700 dark:text-emerald-300">
+                  {selectedLibroName}
+                </span>
+                {selectedYear !== "all" && (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-semibold tracking-[0.2em] text-amber-700 dark:text-amber-300">
+                    Año {selectedYear}
+                  </span>
+                )}
+              </div>
             </div>
-            <input
-              className="min-w-[220px] rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-transparent focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
-              value={searchText}
-              onChange={(event) => setSearchText(event.target.value)}
-              placeholder="Buscar por texto..."
-              aria-label="Buscar movimientos"
-            />
-            <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
-              {movimientosTotal !== null
-                ? `Mostrando: ${filteredMovimientos.length} · Total: ${movimientosTotal}`
-                : `Mostrando: ${filteredMovimientos.length}`}
-            </span>
-            {movimientosLoading && (
-              <span className="text-xs text-[var(--muted)]">
-                Cargando movimientos...
-              </span>
-            )}
-            {movimientosLoadingMore && (
-              <span className="text-xs text-[var(--muted)]">
-                {searchText.trim()
-                  ? "Buscando en todo el histórico..."
-                  : "Cargando más movimientos..."}
-              </span>
-            )}
-            {movimientosError && (
-              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
-                {movimientosError}
-              </span>
-            )}
-            {editError && (
-              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
-                {editError}
-              </span>
-            )}
-            {deleteError && (
-              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
-                {deleteError}
-              </span>
-            )}
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[420px]">
+              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">
+                  <span>Año</span>
+                  <select
+                    className="rounded-full border border-black/10 bg-white px-3 py-2 text-sm normal-case tracking-normal text-[var(--foreground)] shadow-sm outline-none focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                    value={selectedYear}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setSelectedYear(
+                        nextValue === "all" ? "all" : Number(nextValue)
+                      );
+                    }}
+                    disabled={!activeLibroId}
+                    aria-label="Filtrar movimientos por año"
+                  >
+                    <option value="all">Todos</option>
+                    {yearFilterOptions.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input
+                  className="min-w-[220px] flex-1 rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-transparent focus:ring-2 focus:ring-[var(--ring)] dark:border-white/10 dark:bg-black/60"
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  placeholder="Buscar por texto..."
+                  aria-label="Buscar movimientos"
+                />
+                <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
+                  {movimientosTotal !== null
+                    ? `Mostrando: ${filteredMovimientos.length} · ${totalsLabel}: ${movimientosTotal}`
+                    : `Mostrando: ${filteredMovimientos.length}`}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                {movimientosLoading && (
+                  <span className="text-xs text-[var(--muted)]">
+                    Cargando movimientos...
+                  </span>
+                )}
+                {movimientosLoadingMore && (
+                  <span className="text-xs text-[var(--muted)]">
+                    {searchText.trim()
+                      ? "Buscando en todo el histórico..."
+                      : "Cargando más movimientos..."}
+                  </span>
+                )}
+                {movimientosError && (
+                  <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
+                    {movimientosError}
+                  </span>
+                )}
+                {editError && (
+                  <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
+                    {editError}
+                  </span>
+                )}
+                {deleteError && (
+                  <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-700 dark:text-red-300">
+                    {deleteError}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -1369,7 +1522,9 @@ export default function MovimientosClient({
                     >
                       {searchText.trim()
                         ? "No hay movimientos que coincidan con la búsqueda."
-                        : "Sin movimientos en este libro."}
+                        : selectedYear === "all"
+                          ? "Sin movimientos en este libro."
+                          : `Sin movimientos en ${selectedYear}.`}
                     </td>
                   </tr>
                 ) : (
