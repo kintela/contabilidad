@@ -220,7 +220,7 @@ export default function MovimientosClient({
   const [movimientosLoading, setMovimientosLoading] = useState(false);
   const [movimientosLoadingMore, setMovimientosLoadingMore] = useState(false);
   const [movimientosError, setMovimientosError] = useState<string | null>(null);
-  const [movimientosTotal, setMovimientosTotal] = useState<number | null>(null);
+  const [movimientosCount, setMovimientosCount] = useState<number | null>(null);
   const [movimientosPage, setMovimientosPage] = useState(0);
   const [movimientosHasMore, setMovimientosHasMore] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -475,7 +475,7 @@ export default function MovimientosClient({
       setMovimientosLoadingMore(false);
       setMovimientosPage(0);
       setMovimientosHasMore(false);
-      setMovimientosTotal(null);
+      setMovimientosCount(null);
 
       let query = supabase
         .from("movimientos")
@@ -518,7 +518,7 @@ export default function MovimientosClient({
       }));
 
       setMovimientos(sortMovimientos(enriched));
-      setMovimientosTotal(typeof count === "number" ? count : null);
+      setMovimientosCount(typeof count === "number" ? count : null);
       setMovimientosPage(1);
       const hasMore =
         typeof count === "number"
@@ -583,8 +583,8 @@ export default function MovimientosClient({
     const nextPage = movimientosPage + 1;
     setMovimientosPage(nextPage);
     const hasMore =
-      typeof movimientosTotal === "number"
-        ? nextPage * MOVIMIENTOS_PAGE_SIZE < movimientosTotal
+      typeof movimientosCount === "number"
+        ? nextPage * MOVIMIENTOS_PAGE_SIZE < movimientosCount
         : (data?.length ?? 0) >= MOVIMIENTOS_PAGE_SIZE;
     setMovimientosHasMore(hasMore);
     setMovimientosLoadingMore(false);
@@ -594,7 +594,7 @@ export default function MovimientosClient({
     movimientosHasMore,
     movimientosLoadingMore,
     movimientosPage,
-    movimientosTotal,
+    movimientosCount,
     selectedYearRange,
   ]);
 
@@ -666,6 +666,13 @@ export default function MovimientosClient({
     const normalized =
       kind === "gasto" ? -Math.abs(amount) : Math.abs(amount);
     return formatCurrency(normalized);
+  };
+
+  const normalizeMovementAmount = (mov: Movimiento) => {
+    const amount = Number(mov.importe ?? 0);
+    if (!Number.isFinite(amount)) return 0;
+    const kind = resolveKind(mov);
+    return kind === "gasto" ? -Math.abs(amount) : Math.abs(amount);
   };
 
   const addFechaPreview = useMemo(() => {
@@ -744,6 +751,11 @@ export default function MovimientosClient({
       return Math.abs(roundedAmount) === Math.abs(roundedQuery);
     });
   })();
+
+  const filteredMovimientosTotal = filteredMovimientos.reduce(
+    (sum, mov) => sum + normalizeMovementAmount(mov),
+    0
+  );
 
   const parseDateInput = (value: string) => {
     const trimmed = value.trim();
@@ -908,7 +920,7 @@ export default function MovimientosClient({
 
     if (!movementMatchesYear(enriched.fecha, selectedYear)) {
       setMovimientos((prev) => prev.filter((mov) => mov.id !== target.id));
-      setMovimientosTotal((prev) =>
+      setMovimientosCount((prev) =>
         typeof prev === "number" ? Math.max(prev - 1, 0) : prev
       );
     } else {
@@ -973,7 +985,7 @@ export default function MovimientosClient({
     setMovimientos((prev) =>
       prev.filter((item) => item.id !== deleteCandidate.id)
     );
-    setMovimientosTotal((prev) =>
+    setMovimientosCount((prev) =>
       typeof prev === "number" ? Math.max(prev - 1, 0) : prev
     );
     setDeleteLoadingId(null);
@@ -1057,7 +1069,7 @@ export default function MovimientosClient({
 
     if (movementMatchesYear(enriched.fecha, selectedYear)) {
       setMovimientos((prev) => sortMovimientos([enriched, ...prev]));
-      setMovimientosTotal((prev) =>
+      setMovimientosCount((prev) =>
         typeof prev === "number" ? prev + 1 : prev
       );
     }
@@ -1463,9 +1475,9 @@ export default function MovimientosClient({
                   aria-label="Buscar movimientos"
                 />
                 <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] text-[var(--foreground)] shadow-sm dark:border-white/10 dark:bg-black/60">
-                  {movimientosTotal !== null
-                    ? `Mostrando: ${filteredMovimientos.length} · ${totalsLabel}: ${movimientosTotal}`
-                    : `Mostrando: ${filteredMovimientos.length}`}
+                  {movimientosCount !== null
+                    ? `Mostrando: ${filteredMovimientos.length} de ${movimientosCount} · ${totalsLabel}: ${formatCurrency(filteredMovimientosTotal)}`
+                    : `Mostrando: ${filteredMovimientos.length} · ${totalsLabel}: ${formatCurrency(filteredMovimientosTotal)}`}
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-3 lg:justify-end">
